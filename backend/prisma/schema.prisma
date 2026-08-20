@@ -1,0 +1,95 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RoadEventType {
+  ACCIDENT
+  ROAD_CLOSURE
+  ROADWORKS
+  TRAFFIC
+  ROAD_HAZARD
+  TRAFFIC_LIGHT
+  ROAD_SERVICE
+  ROAD_PATROL
+  OTHER
+}
+
+enum RoadEventStatus {
+  ACTIVE
+  UNCONFIRMED
+  STALE
+  RESOLVED
+}
+
+enum RoadEventFeedbackAction {
+  CONFIRM
+  REJECT
+}
+
+model RoadEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  cityId String @map("city_id") @db.VarChar(64)
+
+  type RoadEventType
+
+  status RoadEventStatus @default(UNCONFIRMED)
+
+  title String @db.VarChar(160)
+
+  description String? @db.VarChar(500)
+
+  longitude Float
+
+  latitude Float
+
+  location Unsupported("geometry(Point, 4326)")?
+
+  createdByInstallationId String? @map("created_by_installation_id") @db.VarChar(128)
+
+  confirmationCount Int @default(0) @map("confirmation_count")
+
+  rejectionCount Int @default(0) @map("rejection_count")
+
+  lastConfirmedAt DateTime? @map("last_confirmed_at") @db.Timestamptz(3)
+
+  confidence Float @default(0.5)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  feedbacks RoadEventFeedback[]
+
+  @@index([cityId, status, expiresAt], map: "road_events_city_status_expires_idx")
+  @@index([cityId, type, status], map: "road_events_city_type_status_idx")
+  @@index([createdAt], map: "road_events_created_at_idx")
+  @@map("road_events")
+}
+
+model RoadEventFeedback {
+  id String @id @default(uuid()) @db.Uuid
+
+  roadEventId String @map("road_event_id") @db.Uuid
+
+  installationId String @map("installation_id") @db.VarChar(128)
+
+  action RoadEventFeedbackAction
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roadEvent RoadEvent @relation(fields: [roadEventId], references: [id], onDelete: Cascade)
+
+  @@unique([roadEventId, installationId], map: "road_event_feedback_event_installation_key")
+  @@index([installationId], map: "road_event_feedback_installation_idx")
+  @@index([createdAt], map: "road_event_feedback_created_at_idx")
+  @@map("road_event_feedback")
+}

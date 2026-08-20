@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    platform: linux/amd64
+    container_name: roadradar-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: roadradar
+      POSTGRES_USER: roadradar
+      POSTGRES_PASSWORD: roadradar_dev
+
+    ports:
+      - "127.0.0.1:5434:5432"
+
+    volumes:
+      - roadradar_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U roadradar -d roadradar",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  roadradar_postgres_data:

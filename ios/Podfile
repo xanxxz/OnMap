@@ -6,11 +6,14 @@ require Pod::Executable.execute_command('node', ['-p',
   )', __dir__]).strip
 
 platform :ios, min_ios_version_supported
+
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']
+
 if linkage != nil
   Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+
   use_frameworks! :linkage => linkage.to_sym
 end
 
@@ -19,7 +22,6 @@ target 'RoadRadar' do
 
   use_react_native!(
     :path => config[:reactNativePath],
-    # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
@@ -27,8 +29,9 @@ target 'RoadRadar' do
     react_native_post_install(
       installer,
       config[:reactNativePath],
-      :mac_catalyst_enabled => false,
-      # :ccache_enabled => true
+      :mac_catalyst_enabled => false
     )
+
+    $MLRN.post_install(installer)
   end
 end
