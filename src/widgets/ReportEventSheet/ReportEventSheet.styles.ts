@@ -165,9 +165,9 @@ export const styles =
     },
 
     locationMarker: {
-      width: 42,
+      width: 36,
 
-      height: 42,
+      height: 36,
 
       alignItems: 'center',
 
@@ -175,10 +175,12 @@ export const styles =
         'center',
 
       borderRadius:
-        radius.round,
+        radius[12],
 
       backgroundColor:
         colors.primary,
+
+      transform: [{rotate: '45deg'}],
     },
 
     locationMarkerDot: {
@@ -220,6 +222,52 @@ export const styles =
         colors.danger,
     },
 
+    locationWarning: {
+      ...typography.caption,
+
+      marginTop: spacing[4],
+
+      color: colors.warning,
+    },
+
+    locationProgress: {
+      flexDirection: 'row',
+
+      alignItems: 'center',
+
+      gap: spacing[8],
+
+      marginTop: spacing[6],
+    },
+
+    locationProgressText: {
+      ...typography.caption,
+
+      color: colors.textSecondary,
+    },
+
+    settingsButton: {
+      alignSelf: 'flex-start',
+
+      minHeight: 44,
+
+      justifyContent: 'center',
+
+      marginTop: spacing[6],
+
+      paddingHorizontal: spacing[12],
+
+      borderRadius: radius.round,
+
+      backgroundColor: colors.surfaceMuted,
+    },
+
+    settingsButtonText: {
+      ...typography.caption,
+
+      color: colors.primary,
+    },
+
     actions: {
       flexDirection: 'row',
 
@@ -228,6 +276,104 @@ export const styles =
 
       gap:
         spacing[10],
+    },
+
+    submissionError: {
+      flexDirection: 'row',
+
+      alignItems:
+        'flex-start',
+
+      marginTop:
+        spacing[12],
+
+      padding:
+        spacing[12],
+
+      borderWidth: 1,
+
+      borderColor:
+        'rgba(229,72,77,0.18)',
+
+      borderRadius:
+        radius[16],
+
+      backgroundColor:
+        'rgba(229,72,77,0.06)',
+    },
+
+    submissionErrorWarning: {
+      borderColor:
+        'rgba(217,131,24,0.20)',
+
+      backgroundColor:
+        'rgba(217,131,24,0.07)',
+    },
+
+    submissionErrorIcon: {
+      width: 32,
+
+      height: 32,
+
+      alignItems: 'center',
+
+      justifyContent:
+        'center',
+
+      borderRadius:
+        radius[10],
+
+      backgroundColor:
+        'rgba(229,72,77,0.10)',
+    },
+
+    submissionErrorIconWarning: {
+      backgroundColor:
+        'rgba(217,131,24,0.12)',
+    },
+
+    submissionErrorIconText: {
+      fontSize: 16,
+
+      lineHeight: 19,
+
+      fontWeight: '700',
+
+      color:
+        colors.danger,
+    },
+
+    submissionErrorIconTextWarning: {
+      color:
+        colors.warning,
+    },
+
+    submissionErrorContent: {
+      flex: 1,
+
+      minWidth: 0,
+
+      marginLeft:
+        spacing[10],
+    },
+
+    submissionErrorTitle: {
+      ...typography.caption,
+
+      color:
+        colors.textPrimary,
+    },
+
+    submissionErrorDescription: {
+      fontSize: 11,
+
+      lineHeight: 16,
+
+      marginTop:
+        spacing[2],
+
+      color:
+        colors.textSecondary,
     },
 
     backButton: {
@@ -260,6 +406,10 @@ export const styles =
         colors.textPrimary,
     },
 
+    backButtonDisabled: {
+      opacity: 0.45,
+    },
+
     submitButton: {
       flex: 1,
 
@@ -274,7 +424,7 @@ export const styles =
         radius[16],
 
       backgroundColor:
-        colors.textPrimary,
+        colors.brandForest,
     },
 
     submitButtonDisabled: {

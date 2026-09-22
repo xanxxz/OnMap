@@ -1,6 +1,9 @@
 import {colors} from '../../../shared/theme';
 
-import {RoadEventType} from './roadEvent';
+import {
+  RoadEvent,
+  RoadEventType,
+} from './roadEvent';
 
 interface RoadEventMeta {
   label: string;
@@ -67,4 +70,27 @@ export const ROAD_EVENT_META: Record<
     filterLabel: 'Другое',
     color: colors.other,
   },
+};
+
+export const getRoadEventFilterType = (
+  event:
+    RoadEvent,
+): RoadEventType => {
+  if (
+    event.source !==
+    'TOMTOM'
+  ) {
+    return event.type;
+  }
+
+  switch (event.type) {
+    case 'TRAFFIC_JAM':
+      return 'TRAFFIC';
+
+    case 'HAZARD':
+      return 'ROAD_HAZARD';
+
+    default:
+      return event.type;
+  }
 };

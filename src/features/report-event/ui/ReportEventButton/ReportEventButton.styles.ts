@@ -1,100 +1,89 @@
-import {
-  StyleSheet,
-} from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import {
-  colors,
-  radius,
-  spacing,
-} from '../../../../shared/theme';
+import { colors, radius, spacing } from '../../../../shared/theme';
 
-export const styles =
-  StyleSheet.create({
-    button: {
-      height: 56,
+export const styles = StyleSheet.create({
+  button: {
+    height: 50,
 
-      flexDirection: 'row',
+    flexDirection: 'row',
 
-      alignItems: 'center',
+    alignItems: 'center',
 
-      justifyContent: 'center',
+    justifyContent: 'center',
 
-      paddingHorizontal:
-        spacing[20],
+    paddingHorizontal: spacing[16],
 
-      borderRadius: radius[18],
+    borderRadius: radius[16],
 
-      backgroundColor:
-        colors.textPrimary,
+    backgroundColor: colors.brandForest,
 
-      shadowColor: '#000000',
+    shadowColor: colors.brandDeepForest,
 
-      shadowOpacity: 0.18,
+    shadowOpacity: 0.14,
 
-      shadowRadius: 14,
+    shadowRadius: 12,
 
-      shadowOffset: {
-        width: 0,
+    shadowOffset: {
+      width: 0,
 
-        height: 6,
+      height: 5,
+    },
+
+    elevation: 5,
+  },
+
+  buttonPressed: {
+    opacity: 0.92,
+
+    transform: [
+      {
+        scale: 0.97,
       },
+    ],
+  },
 
-      elevation: 7,
-    },
+  plus: {
+    width: 18,
 
-    buttonPressed: {
-      opacity: 0.92,
+    height: 18,
 
-      transform: [
-        {
-          scale: 0.97,
-        },
-      ],
-    },
+    alignItems: 'center',
 
-    plus: {
-      width: 18,
+    justifyContent: 'center',
+  },
 
-      height: 18,
+  plusHorizontal: {
+    position: 'absolute',
 
-      alignItems: 'center',
+    width: 16,
 
-      justifyContent: 'center',
-    },
+    height: 2,
 
-    plusHorizontal: {
-      position: 'absolute',
+    borderRadius: 1,
 
-      width: 16,
+    backgroundColor: colors.textInverse,
+  },
 
-      height: 2,
+  plusVertical: {
+    position: 'absolute',
 
-      borderRadius: 1,
+    width: 2,
 
-      backgroundColor:
-        colors.textInverse,
-    },
+    height: 16,
 
-    plusVertical: {
-      position: 'absolute',
+    borderRadius: 1,
 
-      width: 2,
+    backgroundColor: colors.textInverse,
+  },
 
-      height: 16,
+  label: {
+    marginLeft: spacing[8],
 
-      borderRadius: 1,
+    color: colors.textInverse,
 
-      backgroundColor:
-        colors.textInverse,
-    },
+    fontSize: 14,
 
-    label: {
-      marginLeft: spacing[8],
-
-      color: colors.textInverse,
-
-      fontSize: 14,
-
-      fontWeight: '700',
-    },
-  });
+    fontWeight: '700',
+  },
+});

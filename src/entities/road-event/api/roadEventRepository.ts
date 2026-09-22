@@ -9,7 +9,16 @@ import {
 import {
   RoadEvent,
   RoadEventType,
+  UserRoadEvent,
+  TelegramRoadEvent,
 } from '../model/roadEvent';
+
+export interface DpsActivitySummary {
+  cityId: string;
+  onMap: number;
+  unlocated: number;
+  total: number;
+}
 
 export interface RoadEventListParams {
   cityId: string;
@@ -41,11 +50,6 @@ export interface RoadEventFeedbackInput {
     RoadEventFeedbackAction;
 }
 
-export interface RoadEventFeedbackRequest
-  extends RoadEventFeedbackInput {
-  installationId: string;
-}
-
 export interface RoadEventRepository {
   list(
     params:
@@ -55,10 +59,12 @@ export interface RoadEventRepository {
   create(
     input:
       CreateRoadEventInput,
-  ): Promise<RoadEvent>;
+  ): Promise<UserRoadEvent | TelegramRoadEvent>;
 
   feedback(
     input:
-      RoadEventFeedbackRequest,
-  ): Promise<RoadEvent>;
+      RoadEventFeedbackInput,
+  ): Promise<UserRoadEvent | TelegramRoadEvent>;
+
+  getDpsActivitySummary(cityId: string): Promise<DpsActivitySummary>;
 }

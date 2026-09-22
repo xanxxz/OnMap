@@ -1,161 +1,137 @@
-import {
-  StyleSheet,
-} from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import {
-  colors,
-  radius,
-} from '../../../../shared/theme';
+import { colors, radius } from '../../../../shared/theme';
 
-export const styles =
-  StyleSheet.create({
-    container: {
-      alignItems: 'center',
+export const styles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
 
-      gap: 10,
+    gap: 10,
+  },
+
+  zoomGroup: {
+    overflow: 'hidden',
+
+    width: 44,
+
+    borderWidth: 1,
+
+    borderColor: colors.border,
+
+    borderRadius: radius[14],
+
+    backgroundColor: colors.surfaceGlass,
+
+    shadowColor: colors.brandDeepForest,
+
+    shadowOpacity: 0.07,
+
+    shadowRadius: 12,
+
+    shadowOffset: {
+      width: 0,
+      height: 4,
     },
 
-    zoomGroup: {
-      overflow: 'hidden',
+    elevation: 3,
+  },
 
-      width: 46,
+  control: {
+    width: 44,
 
-      borderWidth: 1,
+    height: 44,
 
-      borderColor:
-        colors.border,
+    alignItems: 'center',
 
-      borderRadius:
-        radius[14],
+    justifyContent: 'center',
+  },
 
-      backgroundColor:
-        'rgba(255,255,255,0.97)',
+  controlPressed: {
+    opacity: 0.55,
 
-      shadowColor:
-        '#000000',
-
-      shadowOpacity: 0.1,
-
-      shadowRadius: 12,
-
-      shadowOffset: {
-        width: 0,
-        height: 4,
+    transform: [
+      {
+        scale: 0.96,
       },
+    ],
+  },
 
-      elevation: 5,
+  zoomText: {
+    color: colors.textPrimary,
+
+    fontSize: 25,
+
+    lineHeight: 28,
+
+    fontWeight: '500',
+  },
+
+  divider: {
+    height: StyleSheet.hairlineWidth,
+
+    marginHorizontal: 8,
+
+    backgroundColor: colors.border,
+  },
+
+  locationButton: {
+    width: 44,
+
+    height: 44,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    borderWidth: 1,
+
+    borderColor: colors.border,
+
+    borderRadius: radius[14],
+
+    backgroundColor: colors.surfaceGlass,
+
+    shadowColor: colors.brandDeepForest,
+
+    shadowOpacity: 0.07,
+
+    shadowRadius: 12,
+
+    shadowOffset: {
+      width: 0,
+      height: 4,
     },
 
-    control: {
-      width: 44,
+    elevation: 3,
+  },
 
-      height: 44,
+  locationButtonDisabled: {
+    opacity: 0.38,
+  },
 
-      alignItems: 'center',
+  targetOuter: {
+    width: 21,
 
-      justifyContent:
-        'center',
-    },
+    height: 21,
 
-    controlPressed: {
-      opacity: 0.55,
+    alignItems: 'center',
 
-      transform: [
-        {
-          scale: 0.96,
-        },
-      ],
-    },
+    justifyContent: 'center',
 
-    zoomText: {
-      color:
-        colors.textPrimary,
+    borderWidth: 2,
 
-      fontSize: 25,
+    borderColor: colors.primary,
 
-      lineHeight: 28,
+    borderRadius: radius.round,
+  },
 
-      fontWeight: '500',
-    },
+  targetInner: {
+    width: 7,
 
-    divider: {
-      height:
-        StyleSheet.hairlineWidth,
+    height: 7,
 
-      marginHorizontal: 8,
+    borderRadius: radius.round,
 
-      backgroundColor:
-        colors.border,
-    },
-
-    locationButton: {
-      width: 46,
-
-      height: 46,
-
-      alignItems: 'center',
-
-      justifyContent:
-        'center',
-
-      borderWidth: 1,
-
-      borderColor:
-        colors.border,
-
-      borderRadius:
-        radius[14],
-
-      backgroundColor:
-        'rgba(255,255,255,0.97)',
-
-      shadowColor:
-        '#000000',
-
-      shadowOpacity: 0.1,
-
-      shadowRadius: 12,
-
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-
-      elevation: 5,
-    },
-
-    locationButtonDisabled: {
-      opacity: 0.38,
-    },
-
-    targetOuter: {
-      width: 21,
-
-      height: 21,
-
-      alignItems: 'center',
-
-      justifyContent:
-        'center',
-
-      borderWidth: 2,
-
-      borderColor:
-        colors.primary,
-
-      borderRadius:
-        radius.round,
-    },
-
-    targetInner: {
-      width: 7,
-
-      height: 7,
-
-      borderRadius:
-        radius.round,
-
-      backgroundColor:
-        colors.primary,
-    },
-  });
+    backgroundColor: colors.primary,
+  },
+});

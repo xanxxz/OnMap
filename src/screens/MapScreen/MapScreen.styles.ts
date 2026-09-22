@@ -1,189 +1,104 @@
-import {
-  StyleSheet,
-} from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import {
-  colors,
-  radius,
-  spacing,
-  typography,
-} from '../../shared/theme';
+import { colors, radius, shadows, spacing, typography } from '../../shared/theme';
 
-export const styles =
-  StyleSheet.create({
-    container: {
-      flex: 1,
+export const styles = StyleSheet.create({
+  container: {
+    flex: 1,
 
-      backgroundColor:
-        colors.background,
-    },
+    backgroundColor: colors.background,
+  },
 
-    header: {
-      position: 'absolute',
+  header: {
+    position: 'absolute',
+    left: spacing[16],
+    right: spacing[16],
+    zIndex: 20,
+  },
 
-      left:
-        spacing[16],
+  mapControls: {
+    position: 'absolute',
 
-      minWidth: 170,
+    right: spacing[16],
 
-      paddingHorizontal:
-        spacing[16],
+    zIndex: 7,
+  },
 
-      paddingVertical:
-        spacing[12],
+  dataStatus: {
+    position: 'absolute',
 
-      borderWidth: 1,
+    left: spacing[16],
 
-      borderColor:
-        'rgba(255,255,255,0.68)',
+    right: 72,
 
-      borderRadius:
-        radius[18],
+    zIndex: 8,
+  },
 
-      backgroundColor:
-        'rgba(255,255,255,0.95)',
+  filters: {
+    position: 'absolute',
 
-      shadowColor:
-        '#000000',
+    left: 0,
 
-      shadowOpacity: 0.08,
+    right: 0,
+  },
 
-      shadowRadius: 16,
+  eventCount: {
+    position: 'absolute',
 
-      shadowOffset: {
-        width: 0,
-        height: 5,
-      },
+    left: spacing[16],
 
-      elevation: 4,
-    },
+    minHeight: 38,
 
-    city: {
-      ...typography.heading,
+    flexDirection: 'row',
 
-      color:
-        colors.textPrimary,
-    },
+    alignItems: 'center',
 
-    headerSubtitle: {
-      ...typography.caption,
+    paddingHorizontal: spacing[12],
 
-      marginTop:
-        spacing[2],
+    paddingVertical: spacing[8],
 
-      color:
-        colors.textSecondary,
-    },
+    borderWidth: 1,
 
-    demoNotice: {
-      position:
-        'absolute',
+    borderColor: colors.border,
 
-      left:
-        spacing[16],
+    borderRadius: radius.round,
 
-      paddingHorizontal:
-        spacing[12],
+    backgroundColor: colors.surfaceGlass,
 
-      paddingVertical:
-        spacing[8],
+    ...shadows.floating,
+  },
 
-      borderRadius:
-        radius[12],
+  liveDot: {
+    width: 7,
 
-      backgroundColor:
-        'rgba(255,255,255,0.95)',
-    },
+    height: 7,
 
-    demoNoticeText: {
-      ...typography.caption,
+    marginRight: spacing[8],
 
-      color:
-        colors.textSecondary,
-    },
+    borderRadius: radius.round,
 
-    mapControls: {
-      position:
-        'absolute',
+    backgroundColor: colors.success,
+  },
 
-      right:
-        spacing[16],
-    },
+  liveDotUpdating: {
+    backgroundColor: colors.warning,
+  },
 
-    filters: {
-      position:
-        'absolute',
+  liveDotError: {
+    backgroundColor: colors.danger,
+  },
 
-      left: 0,
+  eventCountText: {
+    ...typography.caption,
 
-      right: 0,
-    },
+    color: colors.textPrimary,
 
-    eventCount: {
-      position:
-        'absolute',
+    fontWeight: '600',
+  },
 
-      left:
-        spacing[16],
+  fab: {
+    position: 'absolute',
 
-      minHeight: 38,
-
-      flexDirection:
-        'row',
-
-      alignItems:
-        'center',
-
-      paddingHorizontal:
-        spacing[12],
-
-      paddingVertical:
-        spacing[8],
-
-      borderWidth: 1,
-
-      borderColor:
-        'rgba(255,255,255,0.65)',
-
-      borderRadius:
-        radius.round,
-
-      backgroundColor:
-        'rgba(255,255,255,0.97)',
-    },
-
-    liveDot: {
-      width: 7,
-
-      height: 7,
-
-      marginRight:
-        spacing[8],
-
-      borderRadius:
-        radius.round,
-
-      backgroundColor:
-        colors.success,
-    },
-
-    liveDotUpdating: {
-      backgroundColor:
-        colors.warning,
-    },
-
-    eventCountText: {
-      ...typography.caption,
-
-      color:
-        colors.textPrimary,
-    },
-
-    fab: {
-      position:
-        'absolute',
-
-      right:
-        spacing[16],
-    },
-  });
+    right: spacing[16],
+  },
+});

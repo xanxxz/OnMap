@@ -27,6 +27,20 @@ enum RoadEventStatus {
   RESOLVED
 }
 
+enum RoadEventSource {
+  USER
+  TELEGRAM
+}
+
+enum RoadEventLocationPrecision {
+  EXACT
+  INTERSECTION
+  LANDMARK
+  STREET
+  AREA
+  SETTLEMENT
+}
+
 enum RoadEventFeedbackAction {
   CONFIRM
   REJECT
@@ -41,6 +55,8 @@ model RoadEvent {
 
   status RoadEventStatus @default(UNCONFIRMED)
 
+  source RoadEventSource @default(USER)
+
   title String @db.VarChar(160)
 
   description String? @db.VarChar(500)
@@ -49,7 +65,13 @@ model RoadEvent {
 
   latitude Float
 
-  location Unsupported("geometry(Point, 4326)")?
+  location Unsupported("geometry(Geometry, 4326)")
+
+  locationPrecision RoadEventLocationPrecision? @map("location_precision")
+
+  locationLabel String? @map("location_label") @db.VarChar(200)
+
+  sourceText String? @map("source_text") @db.VarChar(1000)
 
   createdByInstallationId String? @map("created_by_installation_id") @db.VarChar(128)
 
@@ -67,12 +89,62 @@ model RoadEvent {
 
   expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
 
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(3)
+
   feedbacks RoadEventFeedback[]
+
+  telegramMessages TelegramRoadEventMessage[]
 
   @@index([cityId, status, expiresAt], map: "road_events_city_status_expires_idx")
   @@index([cityId, type, status], map: "road_events_city_type_status_idx")
   @@index([createdAt], map: "road_events_created_at_idx")
+  @@index([location], type: Gist, map: "road_events_location_gist_idx")
+  @@index([source, cityId, type, status, createdAt], map: "road_events_source_match_idx")
   @@map("road_events")
+}
+
+model TelegramRoadEventMessage {
+  id String @id @default(uuid()) @db.Uuid
+
+  source RoadEventSource @default(TELEGRAM)
+
+  sourceChatId String @map("source_chat_id") @db.VarChar(64)
+
+  externalMessageId String @map("external_message_id") @db.VarChar(160)
+
+  roadEventId String? @map("road_event_id") @db.Uuid
+
+  canonicalLocationId String? @map("canonical_location_id") @db.VarChar(128)
+
+  sourceTimestamp DateTime @map("source_timestamp") @db.Timestamptz(3)
+
+  appliedDecision String @map("applied_decision") @db.VarChar(16)
+
+  outcome String @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roadEvent RoadEvent? @relation(fields: [roadEventId], references: [id], onDelete: SetNull)
+
+  @@unique([source, sourceChatId, externalMessageId], map: "telegram_road_event_messages_source_identity_key")
+  @@index([roadEventId], map: "telegram_road_event_messages_event_idx")
+  @@index([canonicalLocationId, sourceTimestamp], map: "telegram_road_event_messages_location_time_idx")
+  @@map("telegram_road_event_messages")
+}
+
+model TelegramSourceCursor {
+  cityId String @map("city_id") @db.VarChar(64)
+
+  sourceChatId String @map("source_chat_id") @db.VarChar(64)
+
+  lastMessageId BigInt @map("last_message_id")
+
+  lastMessageTimestamp DateTime? @map("last_message_timestamp") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([cityId, sourceChatId])
+  @@map("telegram_source_cursors")
 }
 
 model RoadEventFeedback {

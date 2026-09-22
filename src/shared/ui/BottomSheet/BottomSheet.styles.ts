@@ -5,6 +5,7 @@ import {
 import {
   colors,
   radius,
+  shadows,
   spacing,
 } from '../../theme';
 
@@ -45,24 +46,12 @@ export const styles =
         colors.surface,
 
       borderTopLeftRadius:
-        radius[22],
+        radius[28],
 
       borderTopRightRadius:
-        radius[22],
+        radius[28],
 
-      shadowColor: '#000000',
-
-      shadowOpacity: 0.13,
-
-      shadowRadius: 22,
-
-      shadowOffset: {
-        width: 0,
-
-        height: -5,
-      },
-
-      elevation: 20,
+      ...shadows.sheet,
     },
 
     handle: {

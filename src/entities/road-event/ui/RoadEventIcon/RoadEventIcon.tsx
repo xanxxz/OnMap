@@ -1,15 +1,6 @@
 import React from 'react';
 
 import {
-  Image,
-  View,
-} from 'react-native';
-
-import {
-  ROAD_EVENT_ICON_SOURCE_BY_TYPE,
-} from '../../lib/roadEventIcons';
-
-import {
   RoadEventType,
 } from '../../model/roadEvent';
 
@@ -17,7 +8,7 @@ import {
   ROAD_EVENT_META,
 } from '../../model/roadEventMeta';
 
-import {styles} from './RoadEventIcon.styles';
+import {EventMarker} from '../EventMarker/EventMarker';
 
 interface RoadEventIconProps {
   type: RoadEventType;
@@ -29,25 +20,5 @@ export const RoadEventIcon = ({
   const meta =
     ROAD_EVENT_META[type];
 
-  return (
-    <View
-      style={[
-        styles.container,
-
-        {
-          backgroundColor:
-            meta.color,
-        },
-      ]}>
-      <Image
-        source={
-          ROAD_EVENT_ICON_SOURCE_BY_TYPE[
-            type
-          ]
-        }
-        resizeMode="contain"
-        style={styles.icon}
-      />
-    </View>
-  );
+  return <EventMarker type={type} compact accessibilityLabel={meta.label} />;
 };

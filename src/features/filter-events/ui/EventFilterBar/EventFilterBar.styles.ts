@@ -1,82 +1,101 @@
-import {
-  StyleSheet,
-} from 'react-native';
+import { StyleSheet } from 'react-native';
 
-import {
-  colors,
-  radius,
-  spacing,
-  typography,
-} from '../../../../shared/theme';
+import { colors, radius, spacing, typography } from '../../../../shared/theme';
 
-export const styles =
-  StyleSheet.create({
-    scroll: {
-      flexGrow: 0,
-    },
+export const styles = StyleSheet.create({
+  scroll: {
+    flexGrow: 0,
+  },
 
-    content: {
-      paddingHorizontal:
-        spacing[16],
+  content: {
+    paddingHorizontal: spacing[16],
 
-      gap: spacing[8],
-    },
+    gap: spacing[8],
+  },
 
-    chip: {
-      height: 38,
+  chip: {
+    minHeight: 36,
 
-      flexDirection: 'row',
+    flexDirection: 'row',
 
-      alignItems: 'center',
+    alignItems: 'center',
 
-      paddingHorizontal:
-        spacing[12],
+    paddingHorizontal: spacing[10],
 
-      borderWidth: 1,
+    borderWidth: 1,
 
-      borderColor:
-        colors.border,
+    borderColor: colors.border,
 
-      borderRadius:
-        radius.round,
+    borderRadius: radius.round,
 
-      backgroundColor:
-        'rgba(255,255,255,0.96)',
-    },
+    backgroundColor: colors.surfaceGlass,
+  },
 
-    chipActive: {
-      borderColor:
-        colors.textPrimary,
+  chipActive: {
+    borderColor: 'rgba(79,138,88,0.34)',
 
-      backgroundColor:
-        colors.textPrimary,
-    },
+    backgroundColor: 'rgba(131,185,104,0.18)',
+  },
 
-    chipPressed: {
-      opacity: 0.76,
-    },
+  chipPressed: {
+    opacity: 0.78,
 
-    dot: {
-      width: 7,
+    transform: [{ scale: 0.97 }],
+  },
 
-      height: 7,
+  iconShell: {
+    width: 27,
 
-      marginRight:
-        spacing[6],
+    height: 27,
 
-      borderRadius:
-        radius.round,
-    },
+    alignItems: 'center',
 
-    label: {
-      ...typography.caption,
+    justifyContent: 'center',
 
-      color:
-        colors.textPrimary,
-    },
+    marginRight: spacing[6],
 
-    labelActive: {
-      color:
-        colors.textInverse,
-    },
-  });
+    overflow: 'hidden',
+  },
+
+  iconPosition: {
+    position: 'absolute',
+
+    left: -11,
+
+    top: -11,
+  },
+
+  allIcon: {
+    width: 15,
+
+    height: 15,
+
+    flexDirection: 'row',
+
+    flexWrap: 'wrap',
+
+    gap: 3,
+
+    marginRight: spacing[6],
+  },
+
+  allIconDot: {
+    width: 5,
+
+    height: 5,
+
+    borderRadius: 2,
+
+    backgroundColor: colors.textSecondary,
+  },
+
+  label: {
+    ...typography.caption,
+
+    color: colors.textPrimary,
+  },
+
+  labelActive: {
+    color: colors.brandDeepForest,
+  },
+});

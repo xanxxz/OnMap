@@ -5,6 +5,7 @@ export const radius = {
   16: 16,
   18: 18,
   22: 22,
+  28: 28,
 
   round: 999,
 } as const;

@@ -11,6 +11,10 @@ import {
   RoadEventType,
 } from '../../entities/road-event/model/roadEvent';
 
+import type {
+  RoadEventActionErrorState,
+} from '../../entities/road-event/model/roadEventActionError';
+
 import {
   ROAD_EVENT_META,
 } from '../../entities/road-event/model/roadEventMeta';
@@ -20,6 +24,7 @@ import {
 } from '../../entities/road-event/ui/RoadEventIcon/RoadEventIcon';
 
 import {
+  ReportLocationStatus,
   ReportEventStep,
   ReportLocationSource,
 } from '../../features/report-event/model/reportEventDraft';
@@ -51,9 +56,17 @@ interface ReportEventSheetProps {
     | ReportLocationSource
     | null;
 
+  locationStatus: ReportLocationStatus;
+
+  locationAccuracy: number | null;
+
   locationValid: boolean;
 
   isSubmitting: boolean;
+
+  submissionError?:
+    | RoadEventActionErrorState
+    | null;
 
   onClose: () => void;
 
@@ -64,7 +77,38 @@ interface ReportEventSheetProps {
   ) => void;
 
   onSubmit: () => void;
+
+  onOpenSettings: () => void;
 }
+
+interface CanSubmitReportEventInput {
+  selectedType:
+    | RoadEventType
+    | null;
+
+  coordinate:
+    | [number, number]
+    | null;
+
+  locationValid: boolean;
+
+  isSubmitting: boolean;
+}
+
+export const canSubmitReportEvent = ({
+  selectedType,
+  coordinate,
+  locationValid,
+  isSubmitting,
+}: CanSubmitReportEventInput): boolean => {
+  return (
+    Boolean(
+      selectedType &&
+        coordinate &&
+        locationValid,
+    ) && !isSubmitting
+  );
+};
 
 const EVENT_TYPES: RoadEventType[] =
   [
@@ -100,19 +144,24 @@ export const ReportEventSheet = ({
   selectedType,
   coordinate,
   locationSource,
+  locationStatus,
+  locationAccuracy,
   locationValid,
   isSubmitting,
+  submissionError = null,
   onClose,
   onBack,
   onSelect,
   onSubmit,
+  onOpenSettings,
 }: ReportEventSheetProps) => {
   const canSubmit =
-    Boolean(
-      selectedType &&
-        coordinate &&
-        locationValid,
-    ) && !isSubmitting;
+    canSubmitReportEvent({
+      selectedType,
+      coordinate,
+      locationValid,
+      isSubmitting,
+    });
 
   const selectedMeta =
     selectedType
@@ -120,6 +169,15 @@ export const ReportEventSheet = ({
           selectedType
         ]
       : null;
+
+  const dismissDuplicate =
+    submissionError?.kind ===
+    'duplicate';
+
+  const primaryEnabled =
+    dismissDuplicate
+      ? !isSubmitting
+      : canSubmit;
 
   return (
     <BottomSheet
@@ -255,7 +313,38 @@ export const ReportEventSheet = ({
                 )}
               </Text>
 
-              {!coordinate ? (
+              {locationStatus === 'LOCATING' ? (
+                <View style={styles.locationProgress}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+
+                  <Text style={styles.locationProgressText}>
+                    Определяем вашу позицию
+                  </Text>
+                </View>
+              ) : locationStatus === 'PERMISSION_DENIED' ? (
+                <>
+                  <Text style={styles.locationError}>
+                    Доступ к геопозиции не выдан. Поставьте точку долгим
+                    нажатием на карте или разрешите доступ в настройках.
+                  </Text>
+
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Открыть настройки геолокации"
+                    onPress={onOpenSettings}
+                    style={styles.settingsButton}
+                  >
+                    <Text style={styles.settingsButtonText}>
+                      Открыть настройки
+                    </Text>
+                  </Pressable>
+                </>
+              ) : locationStatus === 'UNAVAILABLE' ? (
+                <Text style={styles.locationError}>
+                  Не удалось получить свежую геопозицию. Поставьте точку
+                  долгим нажатием на карте.
+                </Text>
+              ) : !coordinate ? (
                 <Text
                   style={
                     styles.locationError
@@ -272,28 +361,108 @@ export const ReportEventSheet = ({
                   Точка находится вне
                   рабочей зоны Балаково.
                 </Text>
+              ) : locationStatus === 'APPROXIMATE' ? (
+                <Text style={styles.locationWarning}>
+                  Точка определена приблизительно. Проверьте положение на
+                  карте
+                  {locationAccuracy
+                    ? ` · около ${Math.round(locationAccuracy)} м`
+                    : ''}
+                  .
+                </Text>
+              ) : locationStatus === 'MANUAL' ? (
+                <Text style={styles.locationReady}>
+                  Точка выбрана вручную. Её можно скорректировать долгим
+                  нажатием на карте.
+                </Text>
               ) : (
                 <Text
                   style={
                     styles.locationReady
                   }>
-                  Точка готова к
-                  отправке
+                  Точка определена. При необходимости скорректируйте её на
+                  карте.
                 </Text>
               )}
             </View>
           </View>
 
+          {submissionError ? (
+            <View
+              accessibilityRole="summary"
+              style={[
+                styles.submissionError,
+
+                submissionError.kind !==
+                  'generic' &&
+                  styles.submissionErrorWarning,
+              ]}>
+              <View
+                style={[
+                  styles.submissionErrorIcon,
+
+                  submissionError.kind !==
+                    'generic' &&
+                    styles.submissionErrorIconWarning,
+                ]}>
+                <Text
+                  style={[
+                    styles.submissionErrorIconText,
+
+                    submissionError.kind !==
+                      'generic' &&
+                      styles.submissionErrorIconTextWarning,
+                  ]}>
+                  {submissionError.kind ===
+                  'duplicate'
+                    ? '≈'
+                    : '!'}
+                </Text>
+              </View>
+
+              <View
+                style={
+                  styles.submissionErrorContent
+                }>
+                <Text
+                  style={
+                    styles.submissionErrorTitle
+                  }>
+                  {
+                    submissionError.title
+                  }
+                </Text>
+
+                <Text
+                  style={
+                    styles.submissionErrorDescription
+                  }>
+                  {
+                    submissionError.description
+                  }
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
           <View
             style={styles.actions}>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel="Вернуться к выбору типа события"
+              disabled={
+                isSubmitting
+              }
               onPress={onBack}
               style={({pressed}) => [
                 styles.backButton,
 
                 pressed &&
+                  !isSubmitting &&
                   styles.actionPressed,
+
+                isSubmitting &&
+                  styles.backButtonDisabled,
               ]}>
               <Text
                 style={
@@ -305,16 +474,30 @@ export const ReportEventSheet = ({
 
             <Pressable
               accessibilityRole="button"
-              disabled={!canSubmit}
-              onPress={onSubmit}
+              accessibilityLabel={
+                dismissDuplicate
+                  ? 'Закрыть сообщение о похожем событии'
+                  : submissionError
+                    ?.canRetry
+                    ? 'Повторить отправку события'
+                    : 'Отправить событие'
+              }
+              disabled={
+                !primaryEnabled
+              }
+              onPress={
+                dismissDuplicate
+                  ? onClose
+                  : onSubmit
+              }
               style={({pressed}) => [
                 styles.submitButton,
 
-                !canSubmit &&
+                !primaryEnabled &&
                   styles.submitButtonDisabled,
 
                 pressed &&
-                  canSubmit &&
+                  primaryEnabled &&
                   styles.actionPressed,
               ]}>
               {isSubmitting ? (
@@ -329,7 +512,12 @@ export const ReportEventSheet = ({
                   style={
                     styles.submitButtonText
                   }>
-                  Сообщить
+                  {dismissDuplicate
+                    ? 'Понятно'
+                    : submissionError
+                      ?.canRetry
+                      ? 'Повторить'
+                      : 'Сообщить'}
                 </Text>
               )}
             </Pressable>

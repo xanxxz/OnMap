@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": 1,
+  "cityId": "balakovo",
+  "sha256": "74605e8ae5ffde574525b8d6d17c12007a27f8f9db179101f30b86ad03616968",
+  "streets": 221,
+  "streetsWithGeometry": 187,
+  "ambiguousStreets": 34,
+  "bridges": 4,
+  "areas": 5,
+  "settlements": 5
+}

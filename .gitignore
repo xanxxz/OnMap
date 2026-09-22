@@ -2,6 +2,11 @@
 #
 .DS_Store
 
+# Environment
+.env
+.env.*
+!.env.example
+
 # Xcode
 #
 build/
@@ -38,8 +43,14 @@ local.properties
 # node.js
 #
 node_modules/
+dist/
+*.tsbuildinfo
 npm-debug.log
 yarn-error.log
+runtime-logs/
+
+# Prisma generated client
+/backend/src/generated/prisma/
 
 # fastlane
 #
@@ -73,5 +84,6 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
 # react-native-config codegen
 ios/tmp.xcconfig

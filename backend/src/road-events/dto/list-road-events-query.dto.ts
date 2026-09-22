@@ -15,10 +15,6 @@ export class ListRoadEventsQueryDto {
   @Length(1, 64)
   cityId!: string;
 
-  @IsString()
-  @Length(16, 128)
-  installationId!: string;
-
   @Type(() => Number)
   @IsNumber()
   @Min(-180)

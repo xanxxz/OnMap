@@ -19,13 +19,11 @@ import {
   upsertRealtimeRoadEvent,
 } from '../../../entities/road-event/lib/roadEventRealtimeCache';
 
+import { dpsActivitySummaryKey } from '../../../entities/road-event/model/useDpsActivitySummary';
+
 import {
   ApiError,
 } from '../../../shared/api/httpClient';
-
-import {
-  getInstallationId,
-} from '../../../shared/device/installationIdentity';
 
 import {
   useRoadEventFeedbackStore,
@@ -88,15 +86,8 @@ export const useRoadEventFeedback =
           input:
             RoadEventFeedbackInput,
         ) => {
-          const installationId =
-            await getInstallationId();
-
           return roadEventRepository.feedback(
-            {
-              ...input,
-
-              installationId,
-            },
+            input,
           );
         },
 
@@ -108,6 +99,12 @@ export const useRoadEventFeedback =
           queryClient,
           event,
         );
+
+        if (event.type === 'ROAD_PATROL') {
+          queryClient.invalidateQueries({
+            queryKey: dpsActivitySummaryKey(variables.cityId),
+          });
+        }
 
         markFeedback(
           event.id,

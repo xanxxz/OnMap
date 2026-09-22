@@ -1,4 +1,8 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# OnMap
+
+OnMap — мобильная карта живой дорожной обстановки: события рядом, честная точность геопозиции и вклад горожан в актуальность данных.
+
+Технические идентификаторы проекта пока сохраняют историческое имя `RoadRadar`, чтобы не ломать подпись приложений, bundle ID, Android application ID и локальные данные пользователей.
 
 # Getting Started
 

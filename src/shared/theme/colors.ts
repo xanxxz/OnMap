@@ -1,33 +1,46 @@
 export const colors = {
-  background: '#F3F5F7',
+  brandForest: '#153D32',
+  brandDeepForest: '#0B281F',
+  brandLeaf: '#4F8A58',
+  brandFreshGreen: '#83B968',
+  brandSky: '#55B8DE',
 
-  surface: '#FFFFFF',
-  surfaceMuted: '#F6F7F9',
+  surfaceCream: '#F7F4EA',
+  surfaceMist: '#EDF1EA',
+  surfaceGlass: 'rgba(247,244,234,0.92)',
 
-  textPrimary: '#11151A',
-  textSecondary: '#6B747E',
-  textInverse: '#FFFFFF',
+  background: '#EDF1EA',
 
-  border: '#E3E7EB',
-  borderStrong: '#D3D9DF',
+  surface: '#F7F4EA',
+  surfaceMuted: '#EDF1EA',
 
-  primary: '#146EF5',
+  textPrimary: '#14241E',
+  textSecondary: '#617069',
+  textInverse: '#FDFBF4',
 
-  success: '#169B6B',
-  warning: '#D98318',
-  danger: '#E5484D',
+  border: 'rgba(21,61,50,0.12)',
+  borderStrong: 'rgba(21,61,50,0.22)',
 
-  overlay: 'rgba(12, 17, 22, 0.36)',
+  primary: '#153D32',
 
-  accident: '#E5484D',
-  closure: '#20252B',
-  roadworks: '#D98318',
-  traffic: '#805AD5',
-  hazard: '#E5A000',
-  trafficLight: '#00A37A',
-  roadService: '#2277E5',
+  success: '#4F8A58',
+  warning: '#B67827',
+  danger: '#B94A50',
 
-  roadPatrol: '#315ED9',
+  dangerSoft: '#F4E4E2',
+  warningSoft: '#F4EAD7',
 
-  other: '#697580',
+  overlay: 'rgba(8, 31, 24, 0.38)',
+
+  accident: '#C85155',
+  closure: '#263D35',
+  roadworks: '#C88634',
+  traffic: '#7D6AA6',
+  hazard: '#D29A35',
+  trafficLight: '#3D8B72',
+  roadService: '#3F82A0',
+
+  roadPatrol: '#447BA0',
+
+  other: '#66766F',
 } as const;

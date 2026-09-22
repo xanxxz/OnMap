@@ -3,38 +3,51 @@ import {
 } from '../../../shared/api/httpClient';
 
 import {
-  getInstallationId,
-} from '../../../shared/device/installationIdentity';
-
-import {
-  isRoadEventPayload,
+  parseRoadEventPayload,
 } from './roadEventRealtime';
 
 import {
   CreateRoadEventInput,
-  RoadEventFeedbackRequest,
+  RoadEventFeedbackInput,
+  DpsActivitySummary,
   RoadEventListParams,
   RoadEventRepository,
 } from './roadEventRepository';
 
 import {
   RoadEvent,
+  UserRoadEvent,
 } from '../model/roadEvent';
 
-const assertRoadEvent = (
+const assertPersistedRoadEvent = (
   payload: unknown,
-): RoadEvent => {
-  if (
-    !isRoadEventPayload(
-      payload,
-    )
-  ) {
-    throw new Error(
-      'API returned invalid road event',
-    );
+): UserRoadEvent | Extract<RoadEvent, { source: 'TELEGRAM' }> => {
+  const event = parseRoadEventPayload(payload);
+
+  if (!event || event.source === 'TOMTOM') {
+    throw new Error('API returned invalid persisted road event');
   }
 
-  return payload;
+  return event;
+};
+
+const assertDpsActivitySummary = (payload: unknown): DpsActivitySummary => {
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('cityId' in payload) ||
+    typeof payload.cityId !== 'string' ||
+    !('onMap' in payload) ||
+    typeof payload.onMap !== 'number' ||
+    !('unlocated' in payload) ||
+    typeof payload.unlocated !== 'number' ||
+    !('total' in payload) ||
+    typeof payload.total !== 'number'
+  ) {
+    throw new Error('API returned invalid DPS activity summary');
+  }
+
+  return payload as DpsActivitySummary;
 };
 
 const assertRoadEventList = (
@@ -50,17 +63,34 @@ const assertRoadEventList = (
     );
   }
 
-  if (
-    !payload.every(
-      isRoadEventPayload,
-    )
-  ) {
-    throw new Error(
-      'API returned invalid road event data',
-    );
-  }
+  return payload.flatMap(item => {
+    const event =
+      parseRoadEventPayload(
+        item,
+      );
 
-  return payload;
+    if (!event) {
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        'source' in item &&
+        typeof item.source === 'string' &&
+        ![
+          'USER',
+          'TELEGRAM',
+          'TOMTOM',
+        ].includes(item.source)
+      ) {
+        return [];
+      }
+
+      throw new Error(
+        'API returned invalid road event data',
+      );
+    }
+
+    return [event];
+  });
 };
 
 class HttpRoadEventRepository
@@ -76,9 +106,6 @@ class HttpRoadEventRepository
       );
     }
 
-    const installationId =
-      await getInstallationId();
-
     const [
       west,
       south,
@@ -90,11 +117,6 @@ class HttpRoadEventRepository
       [
         'cityId',
         params.cityId,
-      ],
-
-      [
-        'installationId',
-        installationId,
       ],
 
       [
@@ -140,10 +162,7 @@ class HttpRoadEventRepository
   async create(
     input:
       CreateRoadEventInput,
-  ): Promise<RoadEvent> {
-    const installationId =
-      await getInstallationId();
-
+  ): Promise<UserRoadEvent | Extract<RoadEvent, { source: 'TELEGRAM' }>> {
     const payload =
       await httpRequest<unknown>(
         '/road-events',
@@ -152,23 +171,21 @@ class HttpRoadEventRepository
           method: 'POST',
 
           body:
-            JSON.stringify({
-              ...input,
-
-              installationId,
-            }),
+            JSON.stringify(
+              input,
+            ),
         },
       );
 
-    return assertRoadEvent(
+    return assertPersistedRoadEvent(
       payload,
     );
   }
 
   async feedback(
     input:
-      RoadEventFeedbackRequest,
-  ): Promise<RoadEvent> {
+      RoadEventFeedbackInput,
+  ): Promise<UserRoadEvent | Extract<RoadEvent, { source: 'TELEGRAM' }>> {
     const payload =
       await httpRequest<unknown>(
         `/road-events/${encodeURIComponent(
@@ -182,16 +199,21 @@ class HttpRoadEventRepository
             JSON.stringify({
               action:
                 input.action,
-
-              installationId:
-                input.installationId,
             }),
         },
       );
 
-    return assertRoadEvent(
+    return assertPersistedRoadEvent(
       payload,
     );
+  }
+
+  async getDpsActivitySummary(cityId: string): Promise<DpsActivitySummary> {
+    const payload = await httpRequest<unknown>(
+      `/road-events/dps-summary?cityId=${encodeURIComponent(cityId)}`,
+    );
+
+    return assertDpsActivitySummary(payload);
   }
 }
 

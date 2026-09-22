@@ -4,7 +4,7 @@ import {
   StatusBar,
 } from 'react-native';
 
-import {RootNavigator} from './navigation/RootNavigator';
+import {AppLaunchGate} from './launch/AppLaunchGate';
 import {AppProviders} from './providers/AppProviders';
 
 const App = () => {
@@ -16,7 +16,7 @@ const App = () => {
         backgroundColor="transparent"
       />
 
-      <RootNavigator />
+      <AppLaunchGate />
     </AppProviders>
   );
 };

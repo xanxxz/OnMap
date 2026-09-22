@@ -7,64 +7,156 @@ const storage =
     'roadradarIdentity',
   );
 
-const INSTALLATION_ID_KEY =
-  'installationId';
+const ANONYMOUS_TOKEN_KEY =
+  'anonymousIdentityToken';
 
-let installationIdPromise:
+export type AnonymousIdentityIssuer =
+  () => Promise<string>;
+
+let anonymousTokenPromise:
   | Promise<string>
   | null = null;
 
-const generatePart =
-  (): string => {
-    return Math.random()
-      .toString(36)
-      .slice(2);
-  };
+let refreshTokenPromise:
+  | Promise<string>
+  | null = null;
 
-const generateInstallationId =
-  (): string => {
-    return [
-      'rr',
-      Date.now().toString(36),
-      generatePart(),
-      generatePart(),
-      generatePart(),
-    ].join('_');
-  };
-
-const loadOrCreateInstallationId =
-  async (): Promise<string> => {
-    const existing =
-      await storage.getItem(
-        INSTALLATION_ID_KEY,
-      );
+const createAndStoreToken =
+  async (
+    issueToken:
+      AnonymousIdentityIssuer,
+  ): Promise<string> => {
+    const token =
+      await issueToken();
 
     if (
-      existing &&
-      existing.length >= 16
+      typeof token !==
+        'string' ||
+      token.length === 0
     ) {
-      return existing;
+      throw new Error(
+        'Identity API returned an invalid token',
+      );
     }
-
-    const installationId =
-      generateInstallationId();
 
     await storage.setItem(
-      INSTALLATION_ID_KEY,
-      installationId,
+      ANONYMOUS_TOKEN_KEY,
+      token,
     );
 
-    return installationId;
+    return token;
   };
 
-export const getInstallationId =
-  (): Promise<string> => {
-    if (
-      !installationIdPromise
-    ) {
-      installationIdPromise =
-        loadOrCreateInstallationId();
+const loadOrCreateAnonymousToken =
+  async (
+    issueToken:
+      AnonymousIdentityIssuer,
+  ): Promise<string> => {
+    const existingToken =
+      await storage.getItem(
+        ANONYMOUS_TOKEN_KEY,
+      );
+
+    if (existingToken) {
+      return existingToken;
     }
 
-    return installationIdPromise;
+    return createAndStoreToken(
+      issueToken,
+    );
+  };
+
+export const getAnonymousIdentityToken =
+  (
+    issueToken:
+      AnonymousIdentityIssuer,
+  ): Promise<string> => {
+    if (!anonymousTokenPromise) {
+      const loadPromise =
+        loadOrCreateAnonymousToken(
+          issueToken,
+        );
+
+      const guardedLoadPromise =
+        loadPromise.catch(
+          error => {
+            if (
+              anonymousTokenPromise ===
+              guardedLoadPromise
+            ) {
+              anonymousTokenPromise =
+                null;
+            }
+
+            throw error;
+          },
+        );
+
+      anonymousTokenPromise =
+        guardedLoadPromise;
+    }
+
+    return anonymousTokenPromise;
+  };
+
+export const refreshAnonymousIdentityToken =
+  (
+    issueToken:
+      AnonymousIdentityIssuer,
+  ): Promise<string> => {
+    if (refreshTokenPromise) {
+      return refreshTokenPromise;
+    }
+
+    const refreshPromise =
+      (async () => {
+        await storage.removeItem(
+          ANONYMOUS_TOKEN_KEY,
+        );
+
+        return createAndStoreToken(
+          issueToken,
+        );
+      })();
+
+    const guardedRefreshPromise =
+      refreshPromise.catch(
+        error => {
+          if (
+            anonymousTokenPromise ===
+            guardedRefreshPromise
+          ) {
+            anonymousTokenPromise =
+              null;
+          }
+
+          throw error;
+        },
+      );
+
+    anonymousTokenPromise =
+      guardedRefreshPromise;
+
+    refreshTokenPromise =
+      guardedRefreshPromise.finally(
+        () => {
+          refreshTokenPromise =
+            null;
+        },
+      );
+
+    return refreshTokenPromise;
+  };
+
+export const clearAnonymousIdentityToken =
+  async (): Promise<void> => {
+    anonymousTokenPromise =
+      null;
+
+    refreshTokenPromise =
+      null;
+
+    await storage.removeItem(
+      ANONYMOUS_TOKEN_KEY,
+    );
   };
