@@ -1,0 +1,102 @@
+---
+description: Рабочие правила OnMap/RoadRadar для AI-агентов. Читать перед любыми правками.
+alwaysApply: true
+---
+
+# RoadRadar / OnMap — правила агента
+
+Пользователь видит **OnMap**. Технические id: пакет `com.roadradar.app`, RN name `RoadRadar`, identity storage `roadradarIdentity`. Не переименовывать.
+
+Полный разбор: `docs/AI_PROJECT_GUIDE.md`. Этот файл — короткие запреты и порядок работы.
+
+## Контекст
+
+- RN 0.86 + MapLibre + Zustand + TanStack Query + Socket.IO client.
+- NestJS 11 + Prisma 7 (pg adapter) + PostGIS. API prefix `/api`, порт 4000.
+- Один город рантайма: `cityId = "balakovo"`.
+- Источники событий: `USER` и `TELEGRAM` в БД; `TOMTOM` только в GET list, не в realtime.
+- Координаты везде GeoJSON: `[longitude, latitude]`. Backend city.center — объект `{latitude, longitude}` — не смешивать.
+
+## Git и объём правок
+
+- Не работать в `main` / `master` / `develop` / `dev` / `release`.
+- Не push, merge/rebase в основные ветки, reset --hard, clean, удаление веток — без явной просьбы.
+- Не трогать несвязанные файлы, не «причесывать» форматирование backend (там специфичные переносы).
+- Не выдумывать API, env, типы событий, города, TTL, socket-имена.
+
+## Перед изменениями
+
+1. Прочитать связанные модули из таблицы в `docs/AI_PROJECT_GUIDE.md` §19.
+2. Для крупного изменения сначала план: файлы, контракт, риски, как проверить.
+3. Сверить факты с кодом, не с памятью.
+
+## Frontend
+
+- Экраны: launch → onboarding (локальный AsyncStorage `onmap:onboarding`) → единственный `Map`.
+- Серверное состояние — Query. UI — Zustand (`useMapUiStore`, фильтр, draft, selected city).
+- HTTP только через `src/shared/api/httpClient.ts` (Bearer + refresh 401). Не плодить второй fetch-клиент.
+- Репозиторий событий: `httpRoadEventRepository.ts`. `mockRoadEventRepository.ts` не подключать без задачи.
+- Query key viewport: `['road-events','viewport', cityId, west, south, east, north]` — realtime cache жёстко парсит длину 7.
+- `useRoadEvents`: без bounds запрос не включён; refetch 30s — это fallback при мёртвом сокете.
+- Не ломать онбординг (не требовать API) и display name OnMap.
+
+## Backend
+
+- Контракт событий: `road-events.controller.ts` + DTO + `road-events.service.ts` + `road-events.constants.ts`.
+- Геометрия и list/create/feedback — raw SQL + PostGIS. Не заменять на обычный Prisma CRUD без миграции геометрии.
+- `cityId` валидировать через `getCityConfig`. Точка create — `isCoordinateInsideCityCoverage` (bbox, не displayBoundary).
+- ValidationPipe: whitelist + forbidNonWhitelisted. Лишние поля ломают клиент.
+- Rate limit и unlocated DPS — in-memory; не считать их распределённой защитой.
+- Новые поля БД — только миграцией. После схемы: `prisma generate`.
+- Не добавлять DELETE событий: исчезновение = RESOLVED / expiresAt.
+
+## Карта и гео
+
+- MapLibre: `RoadMap.tsx`, слои событий `RoadEventSource.tsx`.
+- Стиль: MapTiler primary, OpenFreeMap fallback (`env.ts`). Не хардкодить другой style URL без env.
+- `displayBoundary` — визуал. Покрытие и maxBounds камеры — `coverageBounds`.
+- Approximate Telegram (STREET/AREA/…) не рисовать как точный пин, если продукт требует честной точности.
+- Long press и UserLocation отдают `[lng, lat]`.
+
+## API, auth, realtime, ошибки
+
+Разрешённые HTTP пути (prefix `/api`):
+
+- `POST /identity/anonymous` — без Bearer, ответ `{ token }`
+- `GET /health` — без Bearer
+- `GET /weather?cityId=` — без Bearer (клиент всё же шлёт токен)
+- `GET|POST /road-events*` — Bearer обязателен
+
+Токен: `v1.<payload>.<hmac>`. Guard: `Authorization: Bearer …`. Identity = UUID `sub`.
+
+Socket (без `/api`, без auth): subscribe `road-events:subscribe`, события `road-event:created|updated|resolved`, комната `road-events:{cityId}`. TOMTOM в сокете не слать.
+
+Клиентские 409/429 уже размечены в `roadEventActionError.ts`. Новый статус — обработать явно, не глотать как generic, если это пользовательский сценарий.
+
+Дедуп create: 150 м, 30 мин (ДПС — lifetime 75 мин, confirm вместо 409). Не ослаблять без задачи.
+
+## Telegram / TomTom
+
+- Ингest выключен по умолчанию (`TELEGRAM_INGESTION_ENABLED`). Не включать в чужих env.
+- Парсер и persistence идемпотентны по chat+message id. Не ломать unique и cursor store.
+- Маппинг типов: DPS → `ROAD_PATROL` (`telegram-ingestion-persistence.constants.ts`).
+- TomTom: нет ключа / ошибка → пустой массив в list, не 500.
+
+## Тесты и проверка
+
+После правок по затронутому контуру:
+
+- фронт: `npm test` (файлы рядом) и `npm run typecheck`
+- бэкенд: `npm test` в `backend/`
+- не полагаться на `backend/test/app.e2e-spec.ts` — это мёртвый шаблон Nest
+
+Не запускать деструктивные docker/git команды. Не коммитить `.env`.
+
+## Запрещено ломать
+
+- `[lng, lat]` в API и на карте
+- HMAC identity и ключ storage
+- имена socket-событий и форму query keys
+- bbox Балаково и строку `balakovo`
+- bundle id / applicationId
+- PostGIS `location` SRID 4326
