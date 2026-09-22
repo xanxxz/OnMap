@@ -1,83 +1,86 @@
-import {
-  StyleSheet,
-} from 'react-native';
+import {StyleSheet} from 'react-native';
 
-import {
-  colors,
-  radius,
-} from '../../../../shared/theme';
+import {colors, radius, shadows, spacing, typography} from '../../../../shared/theme';
 
-export const styles =
-  StyleSheet.create({
-    container: {
-      alignItems: 'center',
-
-      justifyContent: 'flex-end',
-    },
-
-    marker: {
-      width: 42,
-
-      height: 42,
-
-      alignItems: 'center',
-
-      justifyContent: 'center',
-
-      borderRadius:
-        radius.round,
-
-      borderWidth: 4,
-
-      borderColor:
-        colors.surface,
-
-      backgroundColor:
-        colors.primary,
-
-      shadowColor: '#000000',
-
-      shadowOpacity: 0.2,
-
-      shadowRadius: 10,
-
-      shadowOffset: {
-        width: 0,
-        height: 5,
-      },
-
-      elevation: 7,
-    },
-
-    center: {
-      width: 10,
-
-      height: 10,
-
-      borderRadius:
-        radius.round,
-
-      backgroundColor:
-        colors.surface,
-    },
-
-    tail: {
-      width: 10,
-
-      height: 10,
-
-      marginTop: -7,
-
-      transform: [
-        {
-          rotate: '45deg',
-        },
-      ],
-
-      backgroundColor:
-        colors.primary,
-
-      borderBottomRightRadius:
-        2,
-    },
-  });
+export const styles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  label: {
+    marginBottom: spacing[6],
+    paddingHorizontal: spacing[10],
+    paddingVertical: 5,
+    borderRadius: radius.round,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceGlass,
+    ...shadows.floating,
+  },
+  labelText: {
+    ...typography.caption,
+    color: colors.brandDeepForest,
+  },
+  accuracyRing: {
+    width: 47,
+    height: 47,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(79,138,88,0.48)',
+    backgroundColor: 'rgba(247,244,234,0.54)',
+  },
+  accuracyRingApproximate: {
+    borderColor: 'rgba(182,120,39,0.62)',
+    backgroundColor: 'rgba(244,234,215,0.62)',
+  },
+  marker: {
+    width: 31,
+    height: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.surface,
+    backgroundColor: colors.brandForest,
+    transform: [{rotate: '45deg'}],
+    shadowColor: colors.brandDeepForest,
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 4,
+  },
+  crossHorizontal: {
+    position: 'absolute',
+    width: 14,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.textInverse,
+    transform: [{rotate: '-45deg'}],
+  },
+  crossVertical: {
+    position: 'absolute',
+    width: 2,
+    height: 14,
+    borderRadius: 1,
+    backgroundColor: colors.textInverse,
+    transform: [{rotate: '-45deg'}],
+  },
+  center: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.brandSky,
+    borderWidth: 1,
+    borderColor: colors.surface,
+  },
+  anchorStem: {
+    width: 2,
+    height: 7,
+    marginTop: -1,
+    borderRadius: 1,
+    backgroundColor: colors.brandForest,
+  },
+});

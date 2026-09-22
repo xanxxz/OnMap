@@ -15,9 +15,8 @@ export const roadEventKeys = {
     'road-events',
   ] as const,
 
-  viewport: (
+  city: (
     cityId: string,
-    bounds: MapBounds,
   ) =>
     [
       ...roadEventKeys.all,
@@ -25,6 +24,16 @@ export const roadEventKeys = {
       'viewport',
 
       cityId,
+    ] as const,
+
+  viewport: (
+    cityId: string,
+    bounds: MapBounds,
+  ) =>
+    [
+      ...roadEventKeys.city(
+        cityId,
+      ),
 
       ...bounds,
     ] as const,
@@ -44,11 +53,9 @@ export const useRoadEvents = (
           bounds,
         )
       : [
-          ...roadEventKeys.all,
-
-          'viewport',
-
-          cityId,
+          ...roadEventKeys.city(
+            cityId,
+          ),
 
           'pending',
         ],

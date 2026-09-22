@@ -1,23 +1,5 @@
-export interface CityConfig {
-  id: string;
-
-  name: string;
-
-  center: [number, number];
-
-  navigationBounds: [
-    number,
-    number,
-    number,
-    number,
-  ];
-
-  defaultZoom: number;
-
-  minZoom: number;
-
-  maxZoom: number;
-}
+import type {CityConfig} from './city.types';
+import {balakovoDisplayBoundary} from './balakovo.display-boundary.geojson';
 
 export const balakovoCity: CityConfig = {
   id: 'balakovo',
@@ -26,11 +8,57 @@ export const balakovoCity: CityConfig = {
 
   center: [47.8007, 52.0278],
 
-  navigationBounds: [
-    47.64,
-    51.9,
-    48.04,
-    52.16,
+  displayBoundary: balakovoDisplayBoundary,
+
+  coverageBounds: {
+    west: 47.5,
+    south: 51.82,
+    east: 48.2,
+    north: 52.25,
+  },
+
+  // Technical OnMap coverage, not an administrative city boundary.
+  coverageBoundary: {
+    type: 'Polygon',
+    coordinates: [
+      [
+        [47.5, 51.82],
+        [48.2, 51.82],
+        [48.2, 52.25],
+        [47.5, 52.25],
+        [47.5, 51.82],
+      ],
+    ],
+  },
+
+  nearbyAreas: [
+    {
+      id: 'natalyino',
+      name: 'Натальино',
+      aliases: ['натальино'],
+      type: 'SETTLEMENT',
+    },
+    {
+      id: 'ivanovka',
+      name: 'Ивановка',
+      aliases: ['ивановка'],
+      type: 'SETTLEMENT',
+    },
+    {
+      id: 'podsosenki',
+      name: 'Подсосенки',
+      aliases: ['подсосенки'],
+      type: 'SETTLEMENT',
+    },
+    {
+      id: 'bykov-otrog',
+      name: 'Быков Отрог',
+      aliases: [
+        'быков отрог',
+        'быковотрог',
+      ],
+      type: 'SETTLEMENT',
+    },
   ],
 
   defaultZoom: 13,

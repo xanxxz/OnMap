@@ -1,5 +1,6 @@
 {
   "name": "com.roadradar.app",
+  "description": "OnMap — живая карта дорожных событий города.",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -7,7 +8,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@maplibre/maplibre-react-native": "^11.3.6",

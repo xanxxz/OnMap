@@ -12,6 +12,7 @@ import {
   RoadEvent,
   RoadEventStatus,
   RoadEventType,
+  UserRoadEvent,
 } from '../model/roadEvent';
 
 import {
@@ -346,12 +347,12 @@ const createDateAfterNow = (
 };
 
 const createSeedEvents =
-  (): RoadEvent[] => {
+  (): UserRoadEvent[] => {
     return MOCK_SEEDS.map(
       (
         seed,
         index,
-      ): RoadEvent => {
+      ): UserRoadEvent => {
         const ttlMinutes =
           ROAD_EVENT_TTL_MINUTES[
             seed.type
@@ -359,6 +360,9 @@ const createSeedEvents =
 
         return {
           id: `mock-${index + 1}`,
+
+          source:
+            'USER',
 
           cityId:
             'balakovo',
@@ -378,6 +382,14 @@ const createSeedEvents =
 
           coordinate:
             seed.coordinate,
+
+          geometry: {
+            type:
+              'Point',
+
+            coordinates:
+              seed.coordinate,
+          },
 
           confirmationCount:
             seed.confirmationCount,
@@ -485,10 +497,28 @@ class MockRoadEventRepository
     );
   }
 
+  async getDpsActivitySummary(cityId: string) {
+    refreshMockEvents();
+
+    const onMap = mockEvents.filter(
+      event =>
+        event.cityId === cityId &&
+        event.type === 'ROAD_PATROL' &&
+        event.status !== 'RESOLVED',
+    ).length;
+
+    return {
+      cityId,
+      onMap,
+      unlocated: 0,
+      total: onMap,
+    };
+  }
+
   async create(
     input:
       CreateRoadEventInput,
-  ): Promise<RoadEvent> {
+  ): Promise<UserRoadEvent> {
     const ttlMinutes =
       ROAD_EVENT_TTL_MINUTES[
         input.type
@@ -498,8 +528,11 @@ class MockRoadEventRepository
       Date.now();
 
     const event:
-      RoadEvent = {
+      UserRoadEvent = {
       id: createMockId(),
+
+      source:
+        'USER',
 
       cityId:
         input.cityId,
@@ -518,6 +551,14 @@ class MockRoadEventRepository
 
       coordinate:
         input.coordinate,
+
+      geometry: {
+        type:
+          'Point',
+
+        coordinates:
+          input.coordinate,
+      },
 
       confirmationCount: 0,
 
@@ -549,7 +590,7 @@ class MockRoadEventRepository
   async feedback(
     input:
       RoadEventFeedbackInput,
-  ): Promise<RoadEvent> {
+  ): Promise<UserRoadEvent> {
     const index =
       mockEvents.findIndex(
         event =>

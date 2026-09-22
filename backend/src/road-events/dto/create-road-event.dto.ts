@@ -45,8 +45,4 @@ export class CreateRoadEventDto {
     number,
     number,
   ];
-
-  @IsString()
-  @Length(16, 128)
-  installationId!: string;
 }

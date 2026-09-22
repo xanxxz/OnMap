@@ -26,9 +26,9 @@ async function bootstrap() {
     );
 
   const port =
-    configService.get<number>(
+    configService.getOrThrow<number>(
       'PORT',
-    ) ?? 4000;
+    );
 
   app.setGlobalPrefix(
     'api',

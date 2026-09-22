@@ -1,7 +1,7 @@
 import {
-  RoadEvent,
   RoadEventStatus,
   RoadEventType,
+  UserRoadEvent,
 } from '../model/roadEvent';
 
 export type RoadEventFeedbackAction =
@@ -61,7 +61,7 @@ export const calculateRoadEventConfidence =
   };
 
 const getLastActivityAt = (
-  event: RoadEvent,
+  event: UserRoadEvent,
 ): number => {
   const value =
     event.lastConfirmedAt ??
@@ -74,7 +74,7 @@ const getLastActivityAt = (
 
 export const deriveRoadEventStatus =
   (
-    event: RoadEvent,
+    event: UserRoadEvent,
     now = Date.now(),
   ): RoadEventStatus => {
     if (
@@ -139,9 +139,9 @@ export const deriveRoadEventStatus =
 
 export const refreshRoadEventState =
   (
-    event: RoadEvent,
+    event: UserRoadEvent,
     now = Date.now(),
-  ): RoadEvent => {
+  ): UserRoadEvent => {
     const status =
       deriveRoadEventStatus(
         event,
@@ -163,11 +163,11 @@ export const refreshRoadEventState =
 
 export const applyRoadEventFeedback =
   (
-    event: RoadEvent,
+    event: UserRoadEvent,
     action:
       RoadEventFeedbackAction,
     now = Date.now(),
-  ): RoadEvent => {
+  ): UserRoadEvent => {
     const confirmationCount =
       event.confirmationCount +
       (action === 'CONFIRM'
@@ -191,7 +191,7 @@ export const applyRoadEventFeedback =
         event.type
       ];
 
-    const nextEvent: RoadEvent = {
+    const nextEvent: UserRoadEvent = {
       ...event,
 
       confirmationCount,

@@ -12,8 +12,8 @@ import {
 } from '../../../shared/realtime/socketClient';
 
 import {
-  isRoadEventPayload,
   isRoadEventResolvedPayload,
+  parseRoadEventPayload,
   ROAD_EVENT_REALTIME_EVENTS,
 } from '../api/roadEventRealtime';
 
@@ -21,6 +21,12 @@ import {
   removeRealtimeRoadEvent,
   upsertRealtimeRoadEvent,
 } from '../lib/roadEventRealtimeCache';
+
+import {
+  roadEventKeys,
+} from './useRoadEvents';
+
+import { dpsActivitySummaryKey } from './useDpsActivitySummary';
 
 export type RealtimeStatus =
   | 'disabled'
@@ -56,6 +62,9 @@ export const useRoadEventRealtime =
         return;
       }
 
+      let connectedBefore =
+        false;
+
       const subscribe =
         () => {
           socket.emit(
@@ -68,11 +77,32 @@ export const useRoadEventRealtime =
 
       const handleConnect =
         () => {
+          const reconnected =
+            connectedBefore;
+
+          connectedBefore =
+            true;
+
           setStatus(
             'connected',
           );
 
           subscribe();
+
+          if (reconnected) {
+            queryClient.invalidateQueries(
+              {
+                queryKey:
+                  roadEventKeys.city(
+                    cityId,
+                  ),
+              },
+            );
+
+            queryClient.invalidateQueries({
+              queryKey: dpsActivitySummaryKey(cityId),
+            });
+          }
         };
 
       const handleDisconnect =
@@ -92,10 +122,17 @@ export const useRoadEventRealtime =
 
           if (__DEV__) {
             console.warn(
-              '[RoadRadar] Socket connection error',
+              '[OnMap] Socket connection error',
               error.message,
             );
           }
+        };
+
+      const handleReconnectAttempt =
+        () => {
+          setStatus(
+            'connecting',
+          );
         };
 
       const handleCreated =
@@ -103,11 +140,16 @@ export const useRoadEventRealtime =
           payload:
             unknown,
         ) => {
-          if (
-            !isRoadEventPayload(
+          const event =
+            parseRoadEventPayload(
               payload,
-            ) ||
-            payload.cityId !==
+            );
+
+          if (
+            !event ||
+            event.source ===
+              'TOMTOM' ||
+            event.cityId !==
               cityId
           ) {
             return;
@@ -115,8 +157,14 @@ export const useRoadEventRealtime =
 
           upsertRealtimeRoadEvent(
             queryClient,
-            payload,
+            event,
           );
+
+          if (event.type === 'ROAD_PATROL') {
+            queryClient.invalidateQueries({
+              queryKey: dpsActivitySummaryKey(cityId),
+            });
+          }
         };
 
       const handleUpdated =
@@ -124,11 +172,16 @@ export const useRoadEventRealtime =
           payload:
             unknown,
         ) => {
-          if (
-            !isRoadEventPayload(
+          const event =
+            parseRoadEventPayload(
               payload,
-            ) ||
-            payload.cityId !==
+            );
+
+          if (
+            !event ||
+            event.source ===
+              'TOMTOM' ||
+            event.cityId !==
               cityId
           ) {
             return;
@@ -136,8 +189,14 @@ export const useRoadEventRealtime =
 
           upsertRealtimeRoadEvent(
             queryClient,
-            payload,
+            event,
           );
+
+          if (event.type === 'ROAD_PATROL') {
+            queryClient.invalidateQueries({
+              queryKey: dpsActivitySummaryKey(cityId),
+            });
+          }
         };
 
       const handleResolved =
@@ -159,6 +218,10 @@ export const useRoadEventRealtime =
             queryClient,
             payload.id,
           );
+
+          queryClient.invalidateQueries({
+            queryKey: dpsActivitySummaryKey(cityId),
+          });
         };
 
       socket.on(
@@ -174,6 +237,11 @@ export const useRoadEventRealtime =
       socket.on(
         'connect_error',
         handleConnectError,
+      );
+
+      socket.io.on(
+        'reconnect_attempt',
+        handleReconnectAttempt,
       );
 
       socket.on(
@@ -228,6 +296,11 @@ export const useRoadEventRealtime =
         socket.off(
           'connect_error',
           handleConnectError,
+        );
+
+        socket.io.off(
+          'reconnect_attempt',
+          handleReconnectAttempt,
         );
 
         socket.off(

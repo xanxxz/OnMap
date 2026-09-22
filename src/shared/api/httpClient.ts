@@ -2,10 +2,20 @@ import {
   env,
 } from '../config/env';
 
+import {
+  clearAnonymousIdentityToken,
+  getAnonymousIdentityToken,
+  refreshAnonymousIdentityToken,
+} from '../device/installationIdentity';
+
 interface ApiErrorBody {
   message?: unknown;
 
   error?: unknown;
+}
+
+interface AnonymousIdentityBody {
+  token?: unknown;
 }
 
 export class ApiError
@@ -110,7 +120,7 @@ const getErrorMessage = (
   return `API request failed with status ${status}`;
 };
 
-export const httpRequest =
+const performHttpRequest =
   async <T>(
     path: string,
     options:
@@ -180,4 +190,110 @@ export const httpRequest =
     }
 
     return body as T;
+  };
+
+const issueAnonymousIdentity =
+  async (): Promise<string> => {
+    const body =
+      await performHttpRequest<
+        AnonymousIdentityBody
+      >(
+        '/identity/anonymous',
+
+        {
+          method: 'POST',
+        },
+      );
+
+    if (
+      typeof body?.token !==
+        'string' ||
+      body.token.length === 0
+    ) {
+      throw new Error(
+        'Identity API returned an invalid token',
+      );
+    }
+
+    return body.token;
+  };
+
+const withAuthorization = (
+  options: RequestInit,
+  token: string,
+): RequestInit => {
+  const headers =
+    new Headers(
+      options.headers,
+    );
+
+  headers.set(
+    'Authorization',
+    `Bearer ${token}`,
+  );
+
+  return {
+    ...options,
+
+    headers,
+  };
+};
+
+const isUnauthorized = (
+  error: unknown,
+): error is ApiError => {
+  return (
+    error instanceof ApiError &&
+    error.status === 401
+  );
+};
+
+export const httpRequest =
+  async <T>(
+    path: string,
+    options:
+      RequestInit = {},
+  ): Promise<T> => {
+    const token =
+      await getAnonymousIdentityToken(
+        issueAnonymousIdentity,
+      );
+
+    try {
+      return await performHttpRequest<T>(
+        path,
+        withAuthorization(
+          options,
+          token,
+        ),
+      );
+    } catch (error) {
+      if (!isUnauthorized(error)) {
+        throw error;
+      }
+    }
+
+    const refreshedToken =
+      await refreshAnonymousIdentityToken(
+        issueAnonymousIdentity,
+      );
+
+    try {
+      return await performHttpRequest<T>(
+        path,
+        withAuthorization(
+          options,
+          refreshedToken,
+        ),
+      );
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        await clearAnonymousIdentityToken()
+          .catch(
+            () => undefined,
+          );
+      }
+
+      throw error;
+    }
   };

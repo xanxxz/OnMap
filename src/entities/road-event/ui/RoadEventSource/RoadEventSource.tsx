@@ -1,323 +1,205 @@
-import React, {
-  useMemo,
-  useRef,
-} from 'react';
+import React, {useMemo} from 'react';
 
-import {
-  NativeSyntheticEvent,
-} from 'react-native';
+import {NativeSyntheticEvent} from 'react-native';
 
 import {
   FilterSpecification,
   GeoJSONSource,
-  GeoJSONSourceRef,
-  Images,
   Layer,
+  Marker,
   PressEventWithFeatures,
 } from '@maplibre/maplibre-react-native';
 
+import {formatEventTime} from '../../lib/formatEventTime';
 import {
-  ROAD_EVENT_MAP_IMAGES,
-} from '../../lib/roadEventIcons';
-
-import {
-  roadEventsToGeoJson,
+  clusteredRoadEventsToGeoJson,
+  telegramLineEventsToGeoJson,
+  tomTomLineEventsToGeoJson,
 } from '../../lib/roadEventGeoJson';
+import {RoadEvent} from '../../model/roadEvent';
+import {EventMarker} from '../EventMarker/EventMarker';
 
 import {
-  RoadEvent,
-} from '../../model/roadEvent';
-
-import {
-  clusterCirclePaint,
-  clusterIconLayout,
-  eventCirclePaint,
-  eventIconLayout,
-  selectedEventPaint,
+  approximateAreaHaloPaint,
+  selectedTomTomLinePaint,
+  selectedTelegramApproximateLinePaint,
+  telegramApproximateLinePaint,
+  telegramApproximateOuterLinePaint,
+  tomTomLinePaint,
 } from './RoadEventSource.styles';
 
 interface RoadEventSourceProps {
   events: RoadEvent[];
-
   selectedEventId?: string;
-
-  onEventPress: (
-    event: RoadEvent,
-  ) => void;
-
-  onClusterPress: (
-    coordinate: [
-      number,
-      number,
-    ],
-
-    expansionZoom: number,
-  ) => void;
+  onEventPress: (event: RoadEvent) => void;
 }
 
-const CLUSTER_FILTER:
-  FilterSpecification = [
-    'has',
-    'point_count',
-  ];
+const EVENT_FILTER: FilterSpecification = ['has', 'eventId'];
 
-const EVENT_FILTER:
-  FilterSpecification = [
-    'all',
-
-    [
-      '!',
-      [
-        'has',
-        'point_count',
-      ],
-    ],
-
-    [
-      'has',
-      'eventId',
-    ],
-  ];
-
-const getPointCoordinate = (
-  feature:
-    PressEventWithFeatures['features'][number],
-):
-  | [number, number]
-  | null => {
-  if (
-    feature.geometry.type !==
-    'Point'
-  ) {
-    return null;
+const getEventCoordinate = (event: RoadEvent): [number, number] | null => {
+  if (event.source === 'USER' || event.source === 'TELEGRAM') {
+    return event.coordinate;
   }
 
-  const coordinates =
-    feature.geometry.coordinates;
-
-  if (
-    !Array.isArray(coordinates) ||
-    typeof coordinates[0] !==
-      'number' ||
-    typeof coordinates[1] !==
-      'number'
-  ) {
-    return null;
+  if (event.geometry.type === 'Point') {
+    return event.geometry.coordinates;
   }
 
-  return [
-    coordinates[0],
-    coordinates[1],
-  ];
+  return null;
+};
+
+const getEventTimestamp = (event: RoadEvent): string => {
+  if (event.source === 'TOMTOM') {
+    return event.updatedAt ?? event.startTime ?? event.fetchedAt;
+  }
+
+  return event.createdAt;
+};
+
+const isEventDoubtful = (event: RoadEvent): boolean => {
+  if (event.source === 'TOMTOM') {
+    return false;
+  }
+
+  const confirmations = event.confirmationCount ?? 0;
+  const rejections = event.rejectionCount ?? 0;
+
+  return rejections >= 2 && rejections > confirmations;
+};
+
+export const buildEventMarkerAccessibilityLabel = (
+  event: RoadEvent,
+): string => {
+  const time = formatEventTime(getEventTimestamp(event));
+  const location =
+    event.source === 'TELEGRAM' && event.locationLabel
+      ? event.locationLabel
+      : null;
+
+  return [event.title, location, time]
+    .filter((value): value is string => Boolean(value))
+    .join(', ');
 };
 
 export const RoadEventSource = ({
   events,
   selectedEventId,
   onEventPress,
-  onClusterPress,
 }: RoadEventSourceProps) => {
-  const sourceRef =
-    useRef<GeoJSONSourceRef>(
-      null,
-    );
-
-  const data = useMemo(
-    () =>
-      roadEventsToGeoJson(
-        events,
-      ),
+  const pointData = useMemo(() => clusteredRoadEventsToGeoJson(events), [events]);
+  const tomTomLineData = useMemo(
+    () => tomTomLineEventsToGeoJson(events),
+    [events],
+  );
+  const telegramLineData = useMemo(
+    () => telegramLineEventsToGeoJson(events),
     [events],
   );
 
-  const selectedFilter =
-    useMemo<FilterSpecification>(
-      () => [
-        '==',
+  const selectedFilter = useMemo<FilterSpecification>(
+    () => ['==', ['get', 'eventId'], selectedEventId ?? '__none__'],
+    [selectedEventId],
+  );
 
-        [
-          'get',
-          'eventId',
-        ],
-
-        selectedEventId ??
-          '__none__',
-      ],
-      [selectedEventId],
-    );
-
-  const handlePress = async (
-    event:
-      NativeSyntheticEvent<PressEventWithFeatures>,
+  const handleLinePress = (
+    event: NativeSyntheticEvent<PressEventWithFeatures>,
   ) => {
     event.stopPropagation();
+    const eventId = event.nativeEvent.features?.[0]?.properties?.eventId;
 
-    const feature =
-      event.nativeEvent
-        .features?.[0];
-
-    if (!feature) {
+    if (typeof eventId !== 'string') {
       return;
     }
 
-    const coordinate =
-      getPointCoordinate(
-        feature,
-      );
-
-    if (!coordinate) {
-      return;
+    const roadEvent = events.find(item => item.id === eventId);
+    if (roadEvent) {
+      onEventPress(roadEvent);
     }
-
-    const properties =
-      feature.properties ?? {};
-
-    const rawClusterId =
-      properties.cluster_id;
-
-    const clusterId =
-      typeof rawClusterId ===
-      'number'
-        ? rawClusterId
-        : Number(rawClusterId);
-
-    if (
-      Number.isFinite(
-        clusterId,
-      )
-    ) {
-      try {
-        const expansionZoom =
-          await sourceRef.current?.getClusterExpansionZoom(
-            clusterId,
-          );
-
-        if (
-          typeof expansionZoom ===
-          'number'
-        ) {
-          onClusterPress(
-            coordinate,
-            expansionZoom,
-          );
-        }
-      } catch (error) {
-        console.warn(
-          '[RoadRadar] Failed to expand cluster',
-          error,
-        );
-      }
-
-      return;
-    }
-
-    const eventId =
-      properties.eventId;
-
-    if (
-      typeof eventId !==
-      'string'
-    ) {
-      return;
-    }
-
-    const roadEvent =
-      events.find(
-        item =>
-          item.id === eventId,
-      );
-
-    if (!roadEvent) {
-      return;
-    }
-
-    onEventPress(
-      roadEvent,
-    );
   };
 
   return (
     <>
-      <Images
-        images={
-          ROAD_EVENT_MAP_IMAGES
-        }
-      />
-
       <GeoJSONSource
-        ref={sourceRef}
-        id="road-events-source"
-        data={data}
-        cluster
-        clusterRadius={52}
-        clusterMinPoints={2}
-        clusterMaxZoom={15}
-        hitbox={{
-          top: 14,
-          right: 14,
-          bottom: 14,
-          left: 14,
-        }}
-        onPress={event => {
-          void handlePress(
-            event,
-          );
-        }}>
+        id="telegram-road-event-lines-source"
+        data={telegramLineData}
+        hitbox={{top: 18, right: 18, bottom: 18, left: 18}}
+        onPress={handleLinePress}
+      >
         <Layer
-          id="road-events-selected"
-          type="circle"
-          filter={
-            selectedFilter
-          }
-          paint={
-            selectedEventPaint
-          }
+          id="telegram-road-event-lines-outer"
+          type="line"
+          paint={telegramApproximateOuterLinePaint}
         />
-
         <Layer
-          id="road-events-clusters"
-          type="circle"
-          filter={
-            CLUSTER_FILTER
-          }
-          paint={
-            clusterCirclePaint
-          }
+          id="telegram-road-event-lines"
+          type="line"
+          paint={telegramApproximateLinePaint}
         />
-
         <Layer
-          id="road-events-cluster-icons"
-          type="symbol"
-          filter={
-            CLUSTER_FILTER
-          }
-          layout={
-            clusterIconLayout
-          }
-        />
-
-        <Layer
-          id="road-events-points"
-          type="circle"
-          filter={
-            EVENT_FILTER
-          }
-          paint={
-            eventCirclePaint
-          }
-        />
-
-        <Layer
-          id="road-events-icons"
-          type="symbol"
-          filter={
-            EVENT_FILTER
-          }
-          layout={
-            eventIconLayout
-          }
+          id="telegram-road-event-lines-selected"
+          type="line"
+          filter={selectedFilter}
+          paint={selectedTelegramApproximateLinePaint}
         />
       </GeoJSONSource>
+
+      <GeoJSONSource
+        id="tomtom-road-event-lines-source"
+        data={tomTomLineData}
+        hitbox={{top: 14, right: 14, bottom: 14, left: 14}}
+        onPress={handleLinePress}
+      >
+        <Layer
+          id="tomtom-road-event-lines"
+          type="line"
+          paint={tomTomLinePaint}
+        />
+        <Layer
+          id="tomtom-road-event-lines-selected"
+          type="line"
+          filter={selectedFilter}
+          paint={selectedTomTomLinePaint}
+        />
+      </GeoJSONSource>
+
+      <GeoJSONSource id="road-events-area-halo-source" data={pointData}>
+        <Layer
+          id="road-events-approximate-area-halo"
+          type="circle"
+          filter={[
+            'all',
+            EVENT_FILTER,
+            ['==', ['get', 'source'], 'TELEGRAM'],
+            ['==', ['get', 'locationPrecision'], 'AREA'],
+          ]}
+          paint={approximateAreaHaloPaint}
+        />
+      </GeoJSONSource>
+
+      {events.map(event => {
+        const coordinate = getEventCoordinate(event);
+        if (!coordinate) {
+          return null;
+        }
+
+        return (
+          <Marker
+            key={event.id}
+            id={`road-event-marker-${event.id}`}
+            lngLat={coordinate}
+            anchor="center"
+          >
+            <EventMarker
+              type={event.type}
+              status={event.source === 'TOMTOM' ? undefined : event.status}
+              selected={event.id === selectedEventId}
+              doubtful={isEventDoubtful(event)}
+              accessibilityLabel={buildEventMarkerAccessibilityLabel(event)}
+              onPress={() => onEventPress(event)}
+            />
+          </Marker>
+        );
+      })}
     </>
   );
 };

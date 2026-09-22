@@ -1,394 +1,566 @@
-import {
-  StyleSheet,
-} from 'react-native';
+import { StyleSheet } from 'react-native';
 
-export const styles =
-  StyleSheet.create({
-    container: {
-      position:
-        'absolute',
+import { colors, radius, shadows, typography } from '../../shared/theme';
 
-      left: 12,
+export const styles = StyleSheet.create({
+  container: {
+    position: 'absolute',
 
-      right: 12,
+    left: 12,
 
-      bottom: 12,
+    right: 12,
 
-      paddingTop: 8,
+    zIndex: 10,
 
-      paddingHorizontal: 18,
+    paddingTop: 8,
 
-      paddingBottom: 20,
+    paddingHorizontal: 16,
 
-      borderRadius: 24,
+    paddingBottom: 20,
 
-      backgroundColor:
-        '#FFFFFF',
+    borderRadius: radius[28],
 
-      shadowColor:
-        '#000000',
+    backgroundColor: colors.surface,
 
-      shadowOpacity: 0.12,
+    ...shadows.sheet,
+  },
 
-      shadowRadius: 18,
+  handle: {
+    width: 38,
 
-      shadowOffset: {
-        width: 0,
+    height: 4,
 
-        height: 8,
-      },
+    alignSelf: 'center',
 
-      elevation: 8,
-    },
+    marginBottom: 14,
 
-    handle: {
-      width: 38,
+    borderRadius: 2,
 
-      height: 4,
+    backgroundColor: colors.borderStrong,
+  },
 
-      alignSelf:
-        'center',
+  header: {
+    flexDirection: 'row',
 
-      marginBottom: 14,
+    alignItems: 'flex-start',
 
-      borderRadius: 2,
+    justifyContent: 'space-between',
 
-      backgroundColor:
-        '#D7DCE1',
-    },
+    gap: 12,
+  },
 
-    header: {
-      flexDirection:
-        'row',
+  headerContent: {
+    flex: 1,
+  },
 
-      alignItems:
-        'flex-start',
+  statusRow: {
+    flexDirection: 'row',
 
-      justifyContent:
-        'space-between',
+    alignItems: 'center',
 
-      gap: 12,
-    },
+    gap: 6,
 
-    headerContent: {
-      flex: 1,
-    },
+    marginBottom: 7,
+  },
 
-    statusRow: {
-      flexDirection:
-        'row',
+  statusDot: {
+    width: 7,
 
-      alignItems:
-        'center',
+    height: 7,
 
-      gap: 6,
+    borderRadius: 4,
 
-      marginBottom: 7,
-    },
+    backgroundColor: '#E0A126',
+  },
 
-    statusDot: {
-      width: 7,
+  statusDotActive: {
+    backgroundColor: '#169B6B',
+  },
 
-      height: 7,
+  statusDotStale: {
+    backgroundColor: '#9AA3AC',
+  },
 
-      borderRadius: 4,
+  statusDotResolved: {
+    backgroundColor: '#697580',
+  },
 
-      backgroundColor:
-        '#E0A126',
-    },
+  statusText: {
+    fontSize: 12,
 
-    statusDotActive: {
-      backgroundColor:
-        '#169B6B',
-    },
+    fontWeight: '600',
 
-    statusDotStale: {
-      backgroundColor:
-        '#9AA3AC',
-    },
+    color: colors.textSecondary,
+  },
 
-    statusDotResolved: {
-      backgroundColor:
-        '#697580',
-    },
+  sourceBadge: {
+    alignSelf: 'flex-start',
 
-    statusText: {
-      fontSize: 12,
+    marginBottom: 8,
 
-      fontWeight:
-        '600',
+    paddingHorizontal: 9,
 
-      color:
-        '#6B747E',
-    },
+    paddingVertical: 4,
 
-    title: {
-      fontSize: 22,
+    borderRadius: 12,
 
-      lineHeight: 27,
+    backgroundColor: 'rgba(125,106,166,0.12)',
+  },
 
-      fontWeight:
-        '700',
+  sourceBadgeText: {
+    fontSize: 11,
 
-      color:
-        '#11151A',
-    },
+    lineHeight: 14,
 
-    closeButton: {
-      width: 34,
+    fontWeight: '600',
 
-      height: 34,
+    color: colors.traffic,
+  },
 
-      alignItems:
-        'center',
+  title: {
+    ...typography.title,
 
-      justifyContent:
-        'center',
+    flex: 1,
 
-      borderRadius: 17,
+    color: colors.textPrimary,
+  },
 
-      backgroundColor:
-        '#F3F5F7',
-    },
+  titleRow: {
+    flexDirection: 'row',
 
-    closeText: {
-      marginTop: -2,
+    alignItems: 'center',
 
-      fontSize: 24,
+    gap: 8,
+  },
 
-      fontWeight:
-        '400',
+  titleMarker: {
+    width: 36,
 
-      color:
-        '#697580',
-    },
+    height: 36,
 
-    description: {
-      marginTop: 10,
+    alignItems: 'center',
 
-      fontSize: 14,
+    justifyContent: 'center',
 
-      lineHeight: 20,
+    overflow: 'hidden',
+  },
 
-      color:
-        '#5F6973',
-    },
+  dpsSubtitle: {
+    alignSelf: 'flex-start',
+    marginTop: 7,
+    paddingLeft: 9,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.success,
+  },
 
-    metrics: {
-      flexDirection:
-        'row',
+  dpsSubtitleWarning: {
+    borderLeftColor: colors.danger,
+  },
 
-      alignItems:
-        'center',
+  dpsSubtitleText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
 
-      marginTop: 18,
+  dpsSubtitleTextWarning: {
+    color: colors.danger,
+  },
 
-      paddingVertical: 13,
+  closeButton: {
+    width: 34,
 
-      borderRadius: 16,
+    height: 34,
 
-      backgroundColor:
-        '#F6F7F9',
-    },
+    alignItems: 'center',
 
-    metric: {
-      flex: 1,
+    justifyContent: 'center',
 
-      alignItems:
-        'center',
-    },
+    borderRadius: 17,
 
-    metricValue: {
-      fontSize: 16,
+    backgroundColor: colors.surfaceMuted,
+  },
 
-      fontWeight:
-        '700',
+  closeText: {
+    marginTop: -2,
 
-      color:
-        '#11151A',
-    },
+    fontSize: 24,
 
-    metricLabel: {
-      marginTop: 3,
+    fontWeight: '400',
 
-      fontSize: 11,
+    color: colors.textSecondary,
+  },
 
-      color:
-        '#7B848D',
-    },
+  description: {
+    marginTop: 10,
 
-    metricDivider: {
-      width: 1,
+    fontSize: 14,
 
-      height: 26,
+    lineHeight: 20,
 
-      backgroundColor:
-        '#E2E6EA',
-    },
+    color: colors.textSecondary,
+  },
 
-    timestamps: {
-      gap: 3,
+  telegramLocation: {
+    marginTop: 12,
+    padding: 11,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceMuted,
+  },
 
-      marginTop: 12,
-    },
+  telegramLocationTitle: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
 
-    timestamp: {
-      fontSize: 11,
+  telegramPrecision: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
+  },
 
-      lineHeight: 16,
+  telegramApproximationWarning: {
+    marginTop: 5,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+    color: '#9A640D',
+  },
 
-      color:
-        '#8A929A',
-    },
+  telegramSourceText: {
+    marginTop: 12,
+    paddingLeft: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#D9D0EE',
+  },
 
-    feedbackSection: {
-      marginTop: 18,
-    },
+  telegramSourceTextLabel: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '600',
+    color: '#7B6A99',
+  },
 
-    feedbackTitle: {
-      marginBottom: 10,
+  telegramSourceTextValue: {
+    marginTop: 4,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textPrimary,
+  },
 
-      fontSize: 14,
+  externalRoute: {
+    marginTop: 12,
 
-      fontWeight:
-        '600',
+    fontSize: 13,
 
-      color:
-        '#252A30',
-    },
+    lineHeight: 19,
 
-    feedbackActions: {
-      flexDirection:
-        'row',
+    fontWeight: '600',
 
-      gap: 9,
-    },
+    color: '#343B43',
+  },
 
-    confirmButton: {
-      flex: 1,
+  externalMetrics: {
+    flexDirection: 'row',
 
-      minHeight: 48,
+    gap: 9,
 
-      alignItems:
-        'center',
+    marginTop: 16,
+  },
 
-      justifyContent:
-        'center',
+  externalMetric: {
+    flex: 1,
 
-      borderRadius: 14,
+    alignItems: 'center',
 
-      backgroundColor:
-        '#15191E',
-    },
+    paddingHorizontal: 10,
 
-    confirmButtonText: {
-      fontSize: 14,
+    paddingVertical: 12,
 
-      fontWeight:
-        '600',
+    borderRadius: 14,
 
-      color:
-        '#FFFFFF',
-    },
+    backgroundColor: colors.surfaceMuted,
+  },
 
-    rejectButton: {
-      flex: 1,
+  metrics: {
+    flexDirection: 'row',
 
-      minHeight: 48,
+    alignItems: 'center',
 
-      alignItems:
-        'center',
+    marginTop: 18,
 
-      justifyContent:
-        'center',
+    paddingVertical: 13,
 
-      borderWidth: 1,
+    borderRadius: 16,
 
-      borderColor:
-        '#E3E7EB',
+    backgroundColor: colors.surfaceMuted,
+  },
 
-      borderRadius: 14,
+  metric: {
+    flex: 1,
 
-      backgroundColor:
-        '#FFFFFF',
-    },
+    alignItems: 'center',
+  },
 
-    rejectButtonText: {
-      fontSize: 14,
+  metricValue: {
+    fontSize: 16,
 
-      fontWeight:
-        '600',
+    fontWeight: '700',
 
-      color:
-        '#D94348',
-    },
+    color: colors.textPrimary,
+  },
 
-    relationCard: {
-      flexDirection:
-        'row',
+  metricLabel: {
+    marginTop: 3,
 
-      alignItems:
-        'flex-start',
+    fontSize: 11,
 
-      gap: 11,
+    color: colors.textSecondary,
+  },
 
-      padding: 14,
+  metricDivider: {
+    width: 1,
 
-      borderRadius: 16,
+    height: 26,
 
-      backgroundColor:
-        '#F3F7F4',
-    },
+    backgroundColor: colors.border,
+  },
 
-    relationIcon: {
-      width: 22,
+  timestamps: {
+    gap: 3,
 
-      fontSize: 17,
+    marginTop: 12,
+  },
 
-      lineHeight: 22,
+  timestamp: {
+    fontSize: 11,
 
-      fontWeight:
-        '700',
+    lineHeight: 16,
 
-      color:
-        '#169B6B',
+    color: colors.textSecondary,
+  },
 
-      textAlign:
-        'center',
-    },
+  feedbackSection: {
+    marginTop: 18,
+  },
 
-    relationContent: {
-      flex: 1,
-    },
+  feedbackTitle: {
+    marginBottom: 10,
 
-    relationTitle: {
-      fontSize: 14,
+    fontSize: 14,
 
-      lineHeight: 19,
+    fontWeight: '600',
 
-      fontWeight:
-        '600',
+    color: colors.textPrimary,
+  },
 
-      color:
-        '#1E2722',
-    },
+  feedbackActions: {
+    flexDirection: 'row',
 
-    relationDescription: {
-      marginTop: 3,
+    gap: 9,
+  },
 
-      fontSize: 12,
+  feedbackError: {
+    flexDirection: 'row',
 
-      lineHeight: 17,
+    alignItems: 'flex-start',
 
-      color:
-        '#6F7872',
-    },
+    gap: 10,
 
-    buttonPressed: {
-      opacity: 0.72,
-    },
+    marginBottom: 11,
 
-    buttonDisabled: {
-      opacity: 0.5,
-    },
-  });
+    padding: 12,
+
+    borderWidth: 1,
+
+    borderColor: '#F4D1D3',
+
+    borderRadius: 14,
+
+    backgroundColor: '#FFF6F6',
+  },
+
+  feedbackErrorRateLimit: {
+    borderColor: '#F0D4AD',
+
+    backgroundColor: '#FFF9F1',
+  },
+
+  feedbackErrorIcon: {
+    width: 28,
+
+    height: 28,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    borderRadius: 14,
+
+    backgroundColor: '#FCE3E4',
+  },
+
+  feedbackErrorIconRateLimit: {
+    backgroundColor: '#FBEBCF',
+  },
+
+  feedbackErrorIconText: {
+    fontSize: 15,
+
+    lineHeight: 18,
+
+    fontWeight: '700',
+
+    color: '#C83339',
+  },
+
+  feedbackErrorIconTextRateLimit: {
+    color: '#B5660D',
+  },
+
+  feedbackErrorContent: {
+    flex: 1,
+
+    minWidth: 0,
+  },
+
+  feedbackErrorTitle: {
+    fontSize: 13,
+
+    lineHeight: 18,
+
+    fontWeight: '700',
+
+    color: '#6E2024',
+  },
+
+  feedbackErrorTitleRateLimit: {
+    color: '#70420D',
+  },
+
+  feedbackErrorDescription: {
+    marginTop: 2,
+
+    fontSize: 12,
+
+    lineHeight: 17,
+
+    color: '#8B4A4D',
+  },
+
+  feedbackErrorDescriptionRateLimit: {
+    color: '#85602E',
+  },
+
+  confirmButton: {
+    flex: 1,
+
+    minHeight: 48,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    borderRadius: 14,
+
+    backgroundColor: colors.brandForest,
+  },
+
+  confirmButtonText: {
+    fontSize: 14,
+
+    fontWeight: '600',
+
+    color: colors.textInverse,
+  },
+
+  rejectButton: {
+    flex: 1,
+
+    minHeight: 48,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    borderWidth: 1,
+
+    borderColor: colors.borderStrong,
+
+    borderRadius: 14,
+
+    backgroundColor: colors.surface,
+  },
+
+  rejectButtonText: {
+    fontSize: 14,
+
+    fontWeight: '600',
+
+    color: colors.danger,
+  },
+
+  relationCard: {
+    flexDirection: 'row',
+
+    alignItems: 'flex-start',
+
+    gap: 11,
+
+    padding: 14,
+
+    borderRadius: 16,
+
+    backgroundColor: 'rgba(131,185,104,0.11)',
+  },
+
+  relationIcon: {
+    width: 22,
+
+    fontSize: 17,
+
+    lineHeight: 22,
+
+    fontWeight: '700',
+
+    color: colors.success,
+
+    textAlign: 'center',
+  },
+
+  relationContent: {
+    flex: 1,
+  },
+
+  relationTitle: {
+    fontSize: 14,
+
+    lineHeight: 19,
+
+    fontWeight: '600',
+
+    color: colors.textPrimary,
+  },
+
+  relationDescription: {
+    marginTop: 3,
+
+    fontSize: 12,
+
+    lineHeight: 17,
+
+    color: colors.textSecondary,
+  },
+
+  buttonPressed: {
+    opacity: 0.72,
+  },
+
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+});

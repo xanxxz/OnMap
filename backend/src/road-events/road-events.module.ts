@@ -1,32 +1,23 @@
-import {
-  Module,
-} from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
-import {
-  RoadEventsController,
-} from './road-events.controller';
+import { IdentityModule } from '../identity/identity.module';
 
-import {
-  RoadEventsService,
-} from './road-events.service';
+import { TomTomModule } from '../integrations/tomtom/tomtom.module';
 
-import {
-  RoadEventsGateway,
-} from './realtime/road-events.gateway';
+import { RoadEventsController } from './road-events.controller';
+
+import { RoadEventsService } from './road-events.service';
+
+import { RoadEventsGateway } from './realtime/road-events.gateway';
+import { DpsActivityTracker } from './dps-activity-tracker.service';
 
 @Module({
-  controllers: [
-    RoadEventsController,
-  ],
+  imports: [IdentityModule, TomTomModule],
 
-  providers: [
-    RoadEventsService,
-    RoadEventsGateway,
-  ],
+  controllers: [RoadEventsController],
 
-  exports: [
-    RoadEventsService,
-    RoadEventsGateway,
-  ],
+  providers: [RoadEventsService, RoadEventsGateway, DpsActivityTracker],
+
+  exports: [RoadEventsService, RoadEventsGateway, DpsActivityTracker],
 })
 export class RoadEventsModule {}
