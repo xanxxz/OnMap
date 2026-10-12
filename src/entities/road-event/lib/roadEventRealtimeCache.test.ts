@@ -145,6 +145,19 @@ describe('TELEGRAM realtime cache', () => {
     });
   });
 
+  it('keeps the backend percentage and status on realtime updates', () => {
+    upsertRealtimeRoadEvent(queryClient, {
+      ...userEvent,
+      confidencePercent: 40,
+      status: 'UNCONFIRMED',
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    });
+    expect(queryClient.getQueryData<UserRoadEvent[]>(queryKey)?.[0]).toMatchObject({
+      confidencePercent: 40,
+      status: 'UNCONFIRMED',
+    });
+  });
+
   it('does not mix realtime events between city-scoped caches', () => {
     const otherCityKey = [
       'road-events',

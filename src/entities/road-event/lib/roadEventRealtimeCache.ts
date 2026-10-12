@@ -69,10 +69,6 @@ const shouldEventBeVisible = (
     return false;
   }
 
-  if (new Date(event.expiresAt).getTime() <= Date.now()) {
-    return false;
-  }
-
   if (event.geometry.type === 'Point') {
     return isCoordinateWithinBounds(
       event.geometry.coordinates,
