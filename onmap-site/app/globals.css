@@ -1,0 +1,10 @@
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; font-family: Arial, "Helvetica Neue", sans-serif; }
+button, input { font: inherit; }
+img { max-width: 100%; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid #55b8de; outline-offset: 4px; }
+::selection { background: #b9dbb8; color: #153d32; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
