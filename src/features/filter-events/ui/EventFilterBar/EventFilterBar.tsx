@@ -13,6 +13,7 @@ import { useRoadEventFilterStore } from '../../model/useRoadEventFilterStore';
 import { styles } from './EventFilterBar.styles';
 
 const FILTER_TYPES: RoadEventType[] = [
+  'ROAD_PATROL',
   'ACCIDENT',
   'ROAD_CLOSURE',
   'ROADWORKS',
@@ -20,7 +21,6 @@ const FILTER_TYPES: RoadEventType[] = [
   'ROAD_HAZARD',
   'TRAFFIC_LIGHT',
   'ROAD_SERVICE',
-  'ROAD_PATROL',
   'OTHER',
 ];
 

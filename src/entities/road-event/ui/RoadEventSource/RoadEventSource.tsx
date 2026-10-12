@@ -18,6 +18,7 @@ import {
 } from '../../lib/roadEventGeoJson';
 import {RoadEvent} from '../../model/roadEvent';
 import {EventMarker} from '../EventMarker/EventMarker';
+import {getEventMarkerAnchor} from '../EventMarker/eventMarkerVisualConfig';
 
 import {
   approximateAreaHaloPaint,
@@ -57,14 +58,7 @@ const getEventTimestamp = (event: RoadEvent): string => {
 };
 
 const isEventDoubtful = (event: RoadEvent): boolean => {
-  if (event.source === 'TOMTOM') {
-    return false;
-  }
-
-  const confirmations = event.confirmationCount ?? 0;
-  const rejections = event.rejectionCount ?? 0;
-
-  return rejections >= 2 && rejections > confirmations;
+  return event.source !== 'TOMTOM' && event.status === 'STALE';
 };
 
 export const buildEventMarkerAccessibilityLabel = (
@@ -187,7 +181,7 @@ export const RoadEventSource = ({
             key={event.id}
             id={`road-event-marker-${event.id}`}
             lngLat={coordinate}
-            anchor="center"
+            anchor={getEventMarkerAnchor(event.type)}
           >
             <EventMarker
               type={event.type}

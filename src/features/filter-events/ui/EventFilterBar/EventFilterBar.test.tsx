@@ -38,4 +38,19 @@ describe('EventFilterBar', () => {
 
     expect(useRoadEventFilterStore.getState().activeTypes).toEqual([]);
   });
+
+  it('places DPS immediately after the all-events filter', () => {
+    act(() => {
+      renderer = create(<EventFilterBar />);
+    });
+
+    const labels = renderer.root
+      .findAllByProps({accessibilityRole: 'button'})
+      .map(button => button.props.accessibilityLabel);
+    const uniqueLabels = labels.filter(
+      (label, index) => labels.indexOf(label) === index,
+    );
+
+    expect(uniqueLabels.slice(0, 2)).toEqual(['Все события', 'ДПС']);
+  });
 });
