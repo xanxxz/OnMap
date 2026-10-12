@@ -62,5 +62,65 @@ describe('TelegramHistoryCorpusStore', () => {
       rawSourceType: message.rawSourceType,
     });
     expect(metadata).toMatchObject({ saved: 1, pagesFetched: 1 });
+    expect(raw).toContain('"savedAt":');
+  });
+
+  it('preserves actual corpus save time on rewrite and refreshes it for an edited version', async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), 'telegram-corpus-retention-'),
+    );
+    const corpusPath = join(directory, 'history.ndjson');
+    const metadataPath = join(directory, 'metadata.json');
+    let currentTime = new Date('2026-09-01T00:00:00.000Z');
+    const store = new TelegramHistoryCorpusStore(() => currentTime);
+    const message: TelegramMessage = {
+      externalId: 'telegram:-1001:42',
+      source: 'TELEGRAM',
+      cityId: 'balakovo',
+      chatId: '-1001',
+      text: 'авария на комарова',
+      publishedAt: '2020-01-01T00:00:00.000Z',
+      rawSourceType: 'message',
+    };
+    const metadata = {
+      schemaVersion: 1 as const,
+      cityId: 'balakovo',
+      sourceChatId: '-1001',
+      requested: 1,
+      saved: 1,
+      fetchedFromTelegram: 1,
+      pagesFetched: 1,
+      afterSourceFiltering: 1,
+      oldestMessageId: 42,
+      newestMessageId: 42,
+      status: 'FULL' as const,
+      historyExhausted: false,
+      updatedAt: currentTime.toISOString(),
+    };
+
+    await store.write(corpusPath, metadataPath, [message], metadata);
+    currentTime = new Date('2026-09-10T00:00:00.000Z');
+    await store.write(corpusPath, metadataPath, [message], metadata);
+
+    expect((await store.readEntries(corpusPath))[0]?.savedAt).toBe(
+      '2026-09-01T00:00:00.000Z',
+    );
+
+    await store.write(
+      corpusPath,
+      metadataPath,
+      [
+        {
+          ...message,
+          text: 'обновлённый текст',
+          editedAt: currentTime.toISOString(),
+        },
+      ],
+      metadata,
+    );
+
+    expect((await store.readEntries(corpusPath))[0]?.savedAt).toBe(
+      '2026-09-10T00:00:00.000Z',
+    );
   });
 });

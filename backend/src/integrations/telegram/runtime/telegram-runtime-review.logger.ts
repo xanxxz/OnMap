@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import { appendFile, mkdir, rename, rm, stat } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import type { NormalizedTelegramEvent } from '../ingestion/telegram-ingestion.types';
@@ -10,6 +10,7 @@ import type {
   TelegramIngestionSource,
   TelegramMessage,
 } from '../telegram.types';
+import { sanitizeTelegramSourceText } from '../../../road-events/telegram-source-text';
 
 import {
   TELEGRAM_REVIEW_LOG_DIR_DEFAULT,
@@ -52,6 +53,8 @@ interface TelegramRuntimeReviewLogRecord {
   readonly resolverReason: string | null;
   readonly locationConfidence: number | null;
   readonly locationPrecision: NormalizedTelegramEvent['locationPrecision'];
+  readonly locationResolutionMethod?: NormalizedTelegramEvent['locationResolutionMethod'];
+  readonly locationResolutionReason?: NormalizedTelegramEvent['locationResolutionReason'];
   readonly geometryType: 'Point' | 'LineString' | 'MultiLineString' | null;
   readonly geometryProvider: NormalizedTelegramEvent['geometryProvider'];
   readonly geometryStatus: NormalizedTelegramEvent['geometryStatus'];
@@ -106,15 +109,19 @@ export class TelegramRuntimeReviewLogger {
     }
 
     const queued = this.writeQueue.then(async () => {
-      await mkdir(this.directory, { recursive: true });
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      await chmod(this.directory, 0o700).catch(() => undefined);
 
       await Promise.all(
-        Object.values(TELEGRAM_REVIEW_LOG_FILE_NAMES).map((fileName) =>
-          appendFile(resolve(this.directory, fileName), '', {
+        Object.values(TELEGRAM_REVIEW_LOG_FILE_NAMES).map(async (fileName) => {
+          const filePath = resolve(this.directory, fileName);
+          await appendFile(filePath, '', {
             encoding: 'utf8',
             flag: 'a',
-          }),
-        ),
+            mode: 0o600,
+          });
+          await chmod(filePath, 0o600);
+        }),
       );
     });
 
@@ -148,7 +155,8 @@ export class TelegramRuntimeReviewLogger {
       return;
     }
 
-    await mkdir(this.directory, { recursive: true });
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await chmod(this.directory, 0o700).catch(() => undefined);
 
     for (const category of categories) {
       const dedupKey = this.dedupKey(input, category);
@@ -164,7 +172,12 @@ export class TelegramRuntimeReviewLogger {
       const line = `${JSON.stringify(toLogRecord(input))}\n`;
 
       await this.rotateIfNeeded(filePath, Buffer.byteLength(line));
-      await appendFile(filePath, line, { encoding: 'utf8', flag: 'a' });
+      await appendFile(filePath, line, {
+        encoding: 'utf8',
+        flag: 'a',
+        mode: 0o600,
+      });
+      await chmod(filePath, 0o600);
       this.remember(dedupKey);
     }
   }
@@ -249,7 +262,7 @@ const toLogRecord = (
   messageTimestamp: input.message.publishedAt,
   messageVersion: input.message.editedAt ?? input.message.publishedAt,
   rawSourceType: input.message.rawSourceType,
-  text: sanitizeText(input.message.text),
+  text: safeLogText(input.message.text),
   eventType: input.parserResult.eventType,
   intent: input.parserResult.intent,
   state: input.parserResult.state,
@@ -257,25 +270,36 @@ const toLogRecord = (
   parserConfidence: input.parserResult.confidence,
   contextUsed: input.parserResult.contextUsed,
   replyContextUsed: input.event.replyContextUsed,
-  locationInput: input.event.locationInput,
+  locationInput: safeLogText(input.event.locationInput) || null,
   locations: input.parserResult.locations.map(({ text, alias }) => ({
-    text,
-    alias,
+    text: safeLogText(text),
+    alias: alias === null ? null : safeLogText(alias) || null,
   })),
   canonicalLocation:
-    input.event.canonicalLocationTitle ?? input.event.canonicalLocationId,
+    safeLogText(
+      input.event.canonicalLocationTitle ?? input.event.canonicalLocationId,
+    ) || null,
   resolverStatus: input.event.resolverStatus,
   resolverReason:
     input.event.resolverStatus === 'RESOLVED' ? null : input.event.reason,
   locationConfidence: input.event.locationConfidence,
   locationPrecision: input.event.locationPrecision,
+  ...(input.event.locationResolutionMethod
+    ? { locationResolutionMethod: input.event.locationResolutionMethod }
+    : {}),
+  ...(input.event.locationResolutionReason
+    ? { locationResolutionReason: input.event.locationResolutionReason }
+    : {}),
   geometryType: input.event.geometry?.type ?? null,
   geometryProvider: input.event.geometryProvider,
   geometryStatus: input.event.geometryStatus,
   decision: input.event.decision,
   decisionReason: input.event.reason,
   persistenceResult: sanitizePersistenceResult(input.persistenceResult),
-  unknownLocationCandidate: unknownLocationCandidate(input.event),
+  unknownLocationCandidate:
+    unknownLocationCandidate(input.event) === null
+      ? null
+      : safeLogText(unknownLocationCandidate(input.event)) || null,
 });
 
 const unknownLocationCandidate = (
@@ -307,14 +331,18 @@ const safeExternalMessageId = (message: TelegramMessage): string => {
     : message.externalId;
 };
 
-const sanitizeText = (text: string): string =>
-  text
-    .replace(
-      /\b(TELEGRAM_SESSION|TELEGRAM_API_HASH|TELEGRAM_API_ID|API_HASH|API_ID|AUTH_KEY)\s*[:=]\s*\S+/giu,
-      '$1=[redacted]',
-    )
-    .replace(/@[a-z0-9_]{5,32}/giu, '[redacted-username]')
-    .replace(/(?:\+7|8)[\s()-]*\d(?:[\s()-]*\d){9}\b/gu, '[redacted-phone]');
+const safeLogText = (text: string | null): string => {
+  if (text === null) {
+    return '';
+  }
+
+  const withoutCredentialValues = text.replace(
+    /\b(TELEGRAM_SESSION|TELEGRAM_API_HASH|TELEGRAM_API_ID|API_HASH|API_ID|AUTH_KEY)\s*[:=]\s*\S+/giu,
+    '$1=[redacted]',
+  );
+
+  return sanitizeTelegramSourceText(withoutCredentialValues) ?? '';
+};
 
 const isMissingFileError = (error: unknown): boolean =>
   typeof error === 'object' &&

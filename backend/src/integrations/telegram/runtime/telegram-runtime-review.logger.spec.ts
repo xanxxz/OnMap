@@ -256,21 +256,40 @@ describe('TelegramRuntimeReviewLogger', () => {
     });
   });
 
-  it('stores sanitized text without author metadata or source chat id', async () => {
+  it('stores sanitized text and parsed location fields without author metadata or source chat id', async () => {
     const logger = new TelegramRuntimeReviewLogger(configService(directory));
     const privateMessage = message({
       authorName: 'Private Author',
-      text: 'пишите @private_user или +7 (999) 123-45-67',
+      text: 'ДПС на Комарова, пишите @private_user или +7 (999) 123-45-67 t.me/private',
     });
 
-    await logger.record(input({ message: privateMessage }));
-
-    const serialized = JSON.stringify(
-      (await lines(directory, 'telegram-matched.ndjson'))[0],
+    await logger.record(
+      input({
+        message: privateMessage,
+        parserResult: parserResult({
+          locationText: 'Комарова +7 999 123-45-67',
+          locations: [{ text: 'Комарова +7 999 123-45-67', alias: null }],
+        }),
+        event: normalizedEvent({
+          locationInput: 'Комарова +7 999 123-45-67',
+          canonicalLocationTitle: null,
+          canonicalLocationId: 'Комарова +7 999 123-45-67',
+          resolverStatus: 'NOT_FOUND',
+        }),
+      }),
     );
-    expect(serialized).toContain('[redacted-username]');
-    expect(serialized).toContain('[redacted-phone]');
+
+    const record = (await lines(directory, 'telegram-matched.ndjson'))[0];
+    const serialized = JSON.stringify(record);
+    expect(serialized).toContain('[контакт скрыт]');
+    expect(serialized).toContain('[телефон скрыт]');
+    expect(serialized).toContain('[ссылка скрыта]');
+    expect(record?.locationInput).toBe('Комарова [телефон скрыт]');
+    expect(record?.unknownLocationCandidate).toBe('Комарова [телефон скрыт]');
+    expect(record?.canonicalLocation).toBe('Комарова [телефон скрыт]');
     expect(serialized).not.toContain('Private Author');
+    expect(serialized).not.toContain('private_user');
+    expect(serialized).not.toContain('t.me/private');
     expect(serialized).not.toContain('-1001');
   });
 

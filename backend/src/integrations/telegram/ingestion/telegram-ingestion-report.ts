@@ -1,4 +1,5 @@
 import type { TelegramMessage } from '../telegram.types';
+import { sanitizeTelegramSourceText } from '../../../road-events/telegram-source-text';
 
 import {
   TELEGRAM_INGESTION_DEDUP_PREVIEW_WINDOW_MS,
@@ -171,10 +172,17 @@ const samples = (
     .filter((event) => event.decision === decision)
     .slice(0, TELEGRAM_INGESTION_SAMPLE_LIMIT)
     .map((event) => ({
-      textExcerpt: sanitizeText(messagesById.get(event.externalId)?.text ?? ''),
+      textExcerpt: (
+        sanitizeTelegramSourceText(
+          messagesById.get(event.externalId)?.text ?? '',
+        ) ?? ''
+      ).slice(0, 120),
       eventType: event.eventType,
       intent: event.intent,
-      locationInput: event.locationInput,
+      locationInput:
+        event.locationInput === null
+          ? null
+          : (sanitizeTelegramSourceText(event.locationInput) ?? null),
       canonicalLocation: event.canonicalLocationTitle,
       resolverStatus: event.resolverStatus,
       parserConfidence: event.parserConfidence,
@@ -215,12 +223,3 @@ const rememberDuplicateGroup = (
     to: events[events.length - 1].timestamp,
   });
 };
-
-const sanitizeText = (text: string): string =>
-  text
-    .replace(/https?:\/\/\S+/giu, '[link]')
-    .replace(/@[\p{L}\p{N}_]+/gu, '[user]')
-    .replace(/(?:\+?\d[\s()-]*){7,}/gu, '[number]')
-    .replace(/\s+/gu, ' ')
-    .trim()
-    .slice(0, 120);

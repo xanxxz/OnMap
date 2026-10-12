@@ -118,12 +118,7 @@ export class TelegramDryRunIngestionPipeline {
       };
     }
 
-    const resolutions = await this.locationResolver.resolveParserResult(
-      parserResult,
-      city.id,
-    );
-
-    if (parserResult.locations.length > 1 && parserResult.intent !== 'REPORT') {
+    if (parserResult.locations.length > 1) {
       return {
         parserResult,
         events: [
@@ -138,6 +133,11 @@ export class TelegramDryRunIngestionPipeline {
         ],
       };
     }
+
+    const resolutions = await this.locationResolver.resolveParserResult(
+      parserResult,
+      city.id,
+    );
 
     const locations = locationsFor(parserResult);
     const events = resolutions.map((resolution, index) =>
@@ -208,6 +208,12 @@ export class TelegramDryRunIngestionPipeline {
       longitude: resolvedCoordinates?.longitude ?? null,
       geometry: resolution.status === 'RESOLVED' ? resolution.geometry : null,
       locationPrecision: resolution.precision,
+      ...(resolution.status === 'RESOLVED' && resolution.resolutionMethod
+        ? {
+            locationResolutionMethod: resolution.resolutionMethod,
+            locationResolutionReason: resolution.resolutionReason,
+          }
+        : {}),
       geometryProvider: resolution.geometryProvider,
       geometryStatus: resolution.geometryStatus,
       locationConfidence: resolution.confidence,
@@ -230,6 +236,14 @@ const decide = (
   }
 
   if (resolution.status === 'NOT_FOUND') {
+    if (resolution.reason === 'PARTIAL_STREET_AMBIGUOUS') {
+      return review('LOCATION_AMBIGUOUS');
+    }
+
+    if (resolution.reason === 'OUTSIDE_SUPPORTED_AREA') {
+      return review('LOCATION_OUTSIDE_SUPPORTED_AREA');
+    }
+
     if (resolution.reason === 'STREET_GEOMETRY_UNAVAILABLE') {
       return review('STREET_GEOMETRY_UNAVAILABLE');
     }

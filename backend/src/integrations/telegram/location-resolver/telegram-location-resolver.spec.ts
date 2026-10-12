@@ -2,6 +2,7 @@ import * as cityRegistry from '../../../cities/city.registry';
 import { TomTomSearchProvider } from '../../tomtom/tomtom-search.provider';
 import type { TomTomSearchCandidate } from '../../tomtom/tomtom.types';
 import type { BalakovoLocationDictionaryEntry } from '../parser/balakovo-location.dictionary';
+import type { CityLocationConfig } from '../../../cities/city.types';
 import { TELEGRAM_VERIFIED_LOCAL_CONFIDENCE } from './telegram-location-resolver.constants';
 import type { TelegramLocationParserResultInput } from './telegram-location-resolver.types';
 import { TelegramLocationResolver } from './telegram-location-resolver';
@@ -30,6 +31,32 @@ const candidate = (
 });
 
 const actualGetCityConfig = cityRegistry.getCityConfig;
+
+const testStreet = (
+  overrides: Partial<CityLocationConfig> = {},
+): CityLocationConfig => ({
+  id: 'коммунистическая-test',
+  title: 'Коммунистическая улица',
+  aliases: ['коммунистическая улица'],
+  kind: 'STREET',
+  streetGeometry: {
+    start: { latitude: 52, longitude: 47.8 },
+    end: { latitude: 52.02, longitude: 47.82 },
+  },
+  provenance: {
+    identitySource: 'OSM',
+    geometrySource: 'OSM',
+    manualOverride: false,
+  },
+  ...overrides,
+});
+
+const mockCityLocations = (locations: readonly CityLocationConfig[]): void => {
+  jest.spyOn(cityRegistry, 'getCityConfig').mockImplementation((cityId) => {
+    const city = actualGetCityConfig(cityId);
+    return city === undefined ? undefined : { ...city, locations };
+  });
+};
 
 const mockVerifiedLocation = (
   verifiedCoordinates: BalakovoLocationDictionaryEntry['verifiedCoordinates'] = {
@@ -88,6 +115,137 @@ describe('TelegramLocationResolver', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('keeps exact street aliases on the existing exact-resolution path', async () => {
+    jest
+      .mocked(cityRegistry.getCityConfig)
+      .mockImplementation(actualGetCityConfig);
+
+    const result = await resolver.resolve({
+      eventType: 'DPS',
+      location: { text: 'Коммунистическая улица', alias: null },
+    });
+
+    expect(result).toMatchObject({
+      status: 'RESOLVED',
+      source: 'LOCAL',
+      canonicalTitle: 'Коммунистическая улица',
+      precision: 'STREET',
+    });
+    expect(
+      result.status === 'RESOLVED' && result.resolutionMethod,
+    ).toBeUndefined();
+  });
+
+  it('resolves a known street with an unknown qualifier to one approximate point on its geometry', async () => {
+    jest
+      .mocked(cityRegistry.getCityConfig)
+      .mockImplementation(actualGetCityConfig);
+
+    const result = await resolver.resolve({
+      eventType: 'DPS',
+      location: {
+        text: 'коммунистическая остановке балаковский',
+        alias: null,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'RESOLVED',
+      source: 'LOCAL',
+      localLocationId: 'коммунистическая-улица-04209880e8',
+      precision: 'STREET',
+      geometry: { type: 'Point' },
+      resolutionMethod: 'PARTIAL_STREET',
+      resolutionReason: 'UNRESOLVED_QUALIFIER',
+    });
+    expect(result.status === 'RESOLVED' && result.coordinateSource).toBe(
+      'IMPORTED_LOCAL',
+    );
+    expect(provider.search).not.toHaveBeenCalled();
+  });
+
+  it('projects a known same-street landmark onto the street centerline', async () => {
+    const street = testStreet();
+    const anchor: CityLocationConfig = {
+      id: 'known-stop',
+      title: 'Остановка Балаковский',
+      aliases: ['остановка балаковский'],
+      kind: 'LANDMARK',
+      representativePoint: { latitude: 52.01, longitude: 47.81 },
+    };
+    mockCityLocations([street, anchor]);
+
+    const result = await resolver.resolve({
+      eventType: 'DPS',
+      location: {
+        text: 'коммунистическая остановка балаковский',
+        alias: null,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'RESOLVED',
+      canonicalTitle: street.title,
+      precision: 'STREET',
+      geometry: { type: 'Point' },
+      resolutionMethod: 'PARTIAL_STREET',
+      resolutionReason: 'KNOWN_ANCHOR_PROJECTED',
+    });
+    if (result.status === 'RESOLVED' && result.geometry.type === 'Point') {
+      expect(result.geometry.coordinates[0]).toBeCloseTo(47.81, 6);
+      expect(result.geometry.coordinates[1]).toBeCloseTo(52.01, 6);
+    }
+  });
+
+  it('does not collapse two known streets in an intersection into one partial match', async () => {
+    const street = testStreet();
+    const secondStreet: CityLocationConfig = {
+      ...testStreet(),
+      id: 'second-street',
+      title: 'Коммунарная улица',
+      aliases: ['коммунарная улица'],
+    };
+    mockCityLocations([street, secondStreet]);
+
+    await expect(
+      resolver.resolve({
+        eventType: 'DPS',
+        location: { text: 'Коммунистическая и Коммунарная', alias: null },
+      }),
+    ).resolves.toMatchObject({ status: 'NOT_FOUND' });
+  });
+
+  it.each([
+    ['missing street geometry', testStreet({ streetGeometry: undefined })],
+    [
+      'outside supported bounds',
+      testStreet({
+        streetGeometry: {
+          start: { latitude: 54, longitude: 40 },
+          end: { latitude: 54.001, longitude: 40.001 },
+        },
+      }),
+    ],
+  ])('keeps partial resolution in review for %s', async (_label, street) => {
+    mockCityLocations([street]);
+    provider.isAvailable.mockReturnValue(false);
+
+    const result = await resolver.resolve({
+      eventType: 'DPS',
+      location: {
+        text: 'коммунистическая у неизвестной остановки',
+        alias: null,
+      },
+    });
+
+    expect(result.status).toBe('NOT_FOUND');
+    if (result.status === 'NOT_FOUND') {
+      expect(result.reason).toMatch(
+        /STREET_GEOMETRY_UNAVAILABLE|OUTSIDE_SUPPORTED_AREA/u,
+      );
+    }
   });
 
   it('resolves verified local coordinates without TomTom', async () => {

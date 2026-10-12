@@ -10,6 +10,11 @@ import type { TelegramLocationPrecision } from './telegram-location-precision';
 
 export type TelegramLocationResolutionSource = 'LOCAL' | 'TOMTOM';
 
+export type TelegramLocationResolutionMethod = 'PARTIAL_STREET';
+
+export type TelegramLocationResolutionReason =
+  'KNOWN_ANCHOR_PROJECTED' | 'UNRESOLVED_QUALIFIER' | 'STREET_ONLY_FALLBACK';
+
 export type TelegramLocationCoordinateSource =
   'VERIFIED_LOCAL' | 'IMPORTED_LOCAL' | 'TOMTOM' | 'OSM';
 
@@ -27,6 +32,7 @@ export type TelegramLocationNotFoundReason =
   | 'SEARCH_UNAVAILABLE'
   | 'UNSUPPORTED_CITY'
   | 'STREET_GEOMETRY_UNAVAILABLE'
+  | 'PARTIAL_STREET_AMBIGUOUS'
   | 'AREA_GEOMETRY_UNAVAILABLE';
 
 export interface TelegramLocationResolutionDiagnostics {
@@ -68,6 +74,8 @@ interface TelegramResolvedLocationBase extends TelegramLocationResolutionDiagnos
   readonly precision: TelegramLocationPrecision;
   readonly geometryProvider: TelegramGeometryProvider;
   readonly geometryStatus: TelegramGeometryStatus;
+  readonly resolutionMethod?: TelegramLocationResolutionMethod;
+  readonly resolutionReason?: TelegramLocationResolutionReason;
 }
 
 export interface TelegramLocallyResolvedLocation extends TelegramResolvedLocationBase {

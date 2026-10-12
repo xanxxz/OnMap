@@ -1191,9 +1191,9 @@ describe('TelegramMessageParser', () => {
     ],
     ['шлюзы', 'gateway-bridge', 'Шлюзовой мост', 'BRIDGE'],
     ['шлюзовой мост', 'gateway-bridge', 'Шлюзовой мост', 'BRIDGE'],
+    ['старый', 'gateway-bridge', 'Шлюзовой мост', 'BRIDGE'],
     ['генезис', 'genesis', 'Генезис', 'LANDMARK'],
     ['38', 'school-38-stop', 'Остановка у 38-го училища', 'LANDMARK'],
-    ['новый', 'bridge-pobedy', 'Мост Победы', 'BRIDGE'],
     ['победа', 'bridge-pobedy', 'Мост Победы', 'BRIDGE'],
     ['первом', 'first-microdistrict', '1-й микрорайон', 'DISTRICT'],
     ['первый', 'first-microdistrict', '1-й микрорайон', 'DISTRICT'],
@@ -1213,6 +1213,126 @@ describe('TelegramMessageParser', () => {
       kind,
     });
   });
+
+  it.each([
+    ['7 микр', 'district-7-microdistrict', 'DISTRICT'],
+    ['21 магнит', 'magnit-parking-21', 'LANDMARK'],
+    ['арбуза', 'arbuz-store', 'LANDMARK'],
+    ['атлант 4б', 'atlant-store-4b', 'LANDMARK'],
+    ['атлант', 'atlant-store-4b', 'LANDMARK'],
+    ['6 поликлиники', 'polyclinic-6', 'LANDMARK'],
+    ['больничный городок', 'hospital-town', 'LANDMARK'],
+    ['спортзал', 'rabochaya-sports-hall', 'LANDMARK'],
+    ['хлеб', 'bread-factory', 'LANDMARK'],
+    ['кристалл', 'kristall-base', 'LANDMARK'],
+    ['приморье', 'snt-primorye', 'AREA'],
+    ['малая вокзальная пятерки', 'pyaterochka-malaya-vokzalnaya', 'LANDMARK'],
+    ['рынок 4б', 'market-4b', 'LANDMARK'],
+    ['остановка космос', 'cosmos-stop', 'LANDMARK'],
+    ['словакия', 'slovakia-stop', 'LANDMARK'],
+    ['поворот ивановку', 'ivanovka-turn', 'INTERSECTION'],
+    ['минская', 'minskaya-street-aliases', 'STREET'],
+    ['трнавская', 'trnavskaya-street-aliases', 'STREET'],
+    ['малая вокзальная', 'malaya-vokzalnaya-street-aliases', 'STREET'],
+    ['факелу', 'fakel-street-aliases', 'STREET'],
+  ] as const)(
+    'resolves manually confirmed review mapping %s',
+    (alias, id, kind) => {
+      expect(findBalakovoLocationAlias(alias)).toMatchObject({ id, kind });
+    },
+  );
+
+  it.each([
+    ['magnit-parking-21', 52.009736, 47.832456],
+    ['arbuz-store', 52.001966, 47.807707],
+    ['atlant-store-4b', 52.004094, 47.818956],
+    ['polyclinic-6', 52.026425, 47.777902],
+    ['hospital-town', 52.024004, 47.79602],
+    ['pyaterochka-malaya-vokzalnaya', 51.997795, 47.799632],
+    ['slovakia-stop', 52.021458, 47.825368],
+    ['ivanovka-turn', 52.010587, 47.781027],
+  ] as const)(
+    'keeps user-confirmed point coordinates and provenance for %s',
+    (id, latitude, longitude) => {
+      expect(
+        BALAKOVO_LOCATION_DICTIONARY.find((location) => location.id === id),
+      ).toMatchObject({
+        verifiedCoordinates: { latitude, longitude },
+        provenance: {
+          identitySource: 'MANUAL',
+          pointSource: 'MANUAL',
+          manualOverride: true,
+        },
+      });
+    },
+  );
+
+  it('keeps similar confirmed places as separate canonical entities', () => {
+    expect(findBalakovoLocationAlias('21 магнит')?.id).toBe(
+      'magnit-parking-21',
+    );
+    expect(findBalakovoLocationAlias('магнит первом')?.id).toBe(
+      'magnit-first-microdistrict',
+    );
+    expect(findBalakovoLocationAlias('ивановка')?.id).toBe('ivanovka');
+    expect(findBalakovoLocationAlias('поворот ивановку')?.id).toBe(
+      'ivanovka-turn',
+    );
+    expect(findBalakovoLocationAlias('атлант 4б')?.id).toBe('atlant-store-4b');
+    expect(findBalakovoLocationAlias('генезис')?.id).toBe('genesis');
+    expect(findBalakovoLocationAlias('рынок 4б')?.id).toBe('market-4b');
+  });
+
+  it('keeps the confirmed store alias scoped to Malaya Vokzalnaya', () => {
+    expect(findBalakovoLocationAlias('пятерки')).toBeUndefined();
+    expect(findBalakovoLocationAlias('малая вокзальная,пятерки')?.id).toBe(
+      'pyaterochka-malaya-vokzalnaya',
+    );
+  });
+
+  it.each([
+    ['Поворот на Ивановку актив', 'ivanovka-turn'],
+    ['По факелу проехала шкода', 'fakel-street-aliases'],
+    ['Шкода на Минской актив', 'minskaya-street-aliases'],
+    ['ДТП на Малой Вокзальной', 'malaya-vokzalnaya-street-aliases'],
+    ['Хавал около 6 поликлиники стоит', 'polyclinic-6'],
+  ])('uses the city registry mapping for %s', (text, expectedLocationId) => {
+    const result = parser.parse({ message: message(text) });
+
+    expect(result.locationAlias).toBe(expectedLocationId);
+  });
+
+  it('resolves the local Pyaterochka only with an explicit Malaya Vokzalnaya reference', () => {
+    expect(
+      parser.parse({ message: message('Малая Вокзальная, у пятёрки актив') }),
+    ).toMatchObject({
+      locationAlias: 'pyaterochka-malaya-vokzalnaya',
+      locationText: '«Пятёрочка» на Малой Вокзальной',
+    });
+    expect(
+      parser.parse({ message: message('Пятёрки чисто') }).locationAlias,
+    ).not.toBe('pyaterochka-malaya-vokzalnaya');
+  });
+
+  it('requires explicit context to distinguish the Russia cinema and street', () => {
+    expect(
+      parser.parse({ message: message('Россия чисто') }).locationAlias,
+    ).toBeNull();
+    expect(
+      parser.parse({ message: message('Кинотеатр Россия чисто') })
+        .locationAlias,
+    ).toBe('cinema-russia');
+    expect(
+      parser.parse({ message: message('Улица Россия чисто') }).locationAlias,
+    ).toBe('russia-street-aliases');
+  });
+
+  it.each(['1 кп', '1кп', '1кпп', 'десять минут назад', 'пятерки', 'новый'])(
+    'does not promote unresolved review text to a confirmed alias: %s',
+    (alias) => {
+      expect(findBalakovoLocationAlias(alias)).toBeUndefined();
+    },
+  );
 
   it('keeps Mayanga and the Mayanga checkpoint as separate locations', () => {
     const mayanga = findBalakovoLocationAlias('маянга');

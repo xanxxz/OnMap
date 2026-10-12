@@ -10,6 +10,8 @@ import type { TelegramLocationPrecision } from '../location-resolver/telegram-lo
 import type {
   TelegramGeometryProvider,
   TelegramGeometryStatus,
+  TelegramLocationResolutionMethod,
+  TelegramLocationResolutionReason,
 } from '../location-resolver/telegram-location-resolver.types';
 
 export type TelegramIngestionDecision =
@@ -56,6 +58,8 @@ export interface NormalizedTelegramEvent {
   readonly longitude: number | null;
   readonly geometry: ExternalRoadEventGeometry | null;
   readonly locationPrecision: TelegramLocationPrecision | null;
+  readonly locationResolutionMethod?: TelegramLocationResolutionMethod;
+  readonly locationResolutionReason?: TelegramLocationResolutionReason;
   readonly geometryProvider: TelegramGeometryProvider;
   readonly geometryStatus: TelegramGeometryStatus;
   readonly locationConfidence: number | null;

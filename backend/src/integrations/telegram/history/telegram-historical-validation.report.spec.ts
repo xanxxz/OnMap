@@ -3,6 +3,45 @@ import type { TelegramMessage } from '../telegram.types';
 import { buildTelegramHistoricalValidationReport } from './telegram-historical-validation.report';
 
 describe('buildTelegramHistoricalValidationReport', () => {
+  it('sanitizes message and location examples in report output', () => {
+    const fixture = entry('privacy', true, ['CREATE']);
+    const report = buildTelegramHistoricalValidationReport([
+      {
+        ...fixture,
+        message: {
+          ...fixture.message,
+          text: 'ДПС на Комарова +7 (999) 123-45-67 t.me/contact',
+        },
+        result: {
+          ...fixture.result,
+          events: fixture.result.events.map((event) => ({
+            ...event,
+            decision: 'REVIEW' as const,
+            reason: 'LOCATION_NOT_FOUND' as const,
+            resolverStatus: 'NOT_FOUND' as const,
+            locationInput: 'Комарова +7 (999) 123-45-67',
+          })),
+          parserResult: {
+            ...fixture.result.parserResult,
+            locations: [{ text: 'Комарова +7 (999) 123-45-67', alias: null }],
+          },
+        },
+      },
+    ]);
+
+    expect(report.reviewAnalysis[0].text).toBe(
+      'ДПС на Комарова [телефон скрыт] [ссылка скрыта]',
+    );
+    expect(report.reviewAnalysis[0].parsedLocations[0].text).toBe(
+      'Комарова [телефон скрыт]',
+    );
+    expect(report.topUnknownLocations[0].candidate).toBe(
+      'комарова [телефон скрыт]',
+    );
+    expect(JSON.stringify(report)).not.toContain('123-45-67');
+    expect(JSON.stringify(report)).not.toContain('t.me/contact');
+  });
+
   it('keeps message, parser, resolver-candidate and decision-candidate layers consistent', () => {
     const entries = [
       entry('one', true, ['CREATE']),

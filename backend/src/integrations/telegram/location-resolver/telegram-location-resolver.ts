@@ -2,6 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 
 import { getCityConfig } from '../../../cities/city.registry';
 import type {
+  CityCoordinate,
   CityLocationConfig,
   StreetLocationGeometry,
   StreetLocationGeometryPart,
@@ -24,6 +25,8 @@ import {
   TELEGRAM_LOCATION_RESOLVER_CITY_ID,
   TELEGRAM_LOCATION_RESOLVER_THRESHOLDS,
   TELEGRAM_LOCATION_SEARCH_STRATEGIES,
+  TELEGRAM_PARTIAL_STREET_ANCHOR_MAX_DISTANCE_METERS,
+  TELEGRAM_PARTIAL_STREET_CONFIDENCE,
   TELEGRAM_VERIFIED_LOCAL_CONFIDENCE,
 } from './telegram-location-resolver.constants';
 import {
@@ -37,6 +40,7 @@ import type {
   TelegramLocationResolutionDiagnostics,
   TelegramLocationResolutionInput,
   TelegramLocationResolutionResult,
+  TelegramGeometryStatus,
 } from './telegram-location-resolver.types';
 import {
   type TelegramStreetGeometryProvider,
@@ -47,6 +51,20 @@ interface LocalDictionaryMatch {
   readonly entry: CityLocationConfig;
   readonly matchedAlias: string | null;
 }
+
+type PartialStreetMatch =
+  | {
+      readonly status: 'MATCH';
+      readonly entry: CityLocationConfig;
+      readonly matchedAlias: string;
+      readonly anchor: CityCoordinate | null;
+      readonly resolutionReason:
+        | 'KNOWN_ANCHOR_PROJECTED'
+        | 'UNRESOLVED_QUALIFIER'
+        | 'STREET_ONLY_FALLBACK';
+    }
+  | { readonly status: 'AMBIGUOUS' }
+  | null;
 
 interface ScoredCandidate {
   readonly candidate: TomTomSearchCandidate;
@@ -93,6 +111,32 @@ export class TelegramLocationResolver {
       input.location,
       normalizedInput,
     );
+
+    if (localMatch === undefined && input.location !== null) {
+      const partialStreetMatch = findPartialStreetMatch(
+        city.locations,
+        normalizedInput,
+      );
+
+      if (partialStreetMatch?.status === 'AMBIGUOUS') {
+        return notFound(
+          normalizedInput,
+          'PARTIAL_STREET_AMBIGUOUS',
+          emptyDiagnostics,
+        );
+      }
+
+      if (partialStreetMatch?.status === 'MATCH') {
+        return this.resolvePartialStreet({
+          cityId,
+          bounds,
+          normalizedInput,
+          match: partialStreetMatch,
+          emptyDiagnostics,
+        });
+      }
+    }
+
     const canonicalTitle = localMatch?.entry.title ?? null;
     const normalizedQuery = normalizeLocationQuery(
       canonicalTitle ?? rawLocation,
@@ -584,6 +628,122 @@ export class TelegramLocationResolver {
     };
   }
 
+  private async resolvePartialStreet(input: {
+    readonly cityId: string;
+    readonly bounds: CityBounds;
+    readonly normalizedInput: string;
+    readonly match: Exclude<PartialStreetMatch, null | { status: 'AMBIGUOUS' }>;
+    readonly emptyDiagnostics: TelegramLocationResolutionDiagnostics;
+  }): Promise<TelegramLocationResolutionResult> {
+    const { entry, matchedAlias, anchor, resolutionReason } = input.match;
+    let parts: readonly (readonly [number, number][])[];
+    let geometryProvider: 'OSM' | null = null;
+    let coordinateSource: 'IMPORTED_LOCAL' | 'VERIFIED_LOCAL' | 'OSM';
+    let confidence = TELEGRAM_PARTIAL_STREET_CONFIDENCE;
+    let geometryStatus: TelegramGeometryStatus = 'RESOLVED';
+
+    if (entry.streetGeometryStatus === 'AMBIGUOUS') {
+      return notFound(
+        input.normalizedInput,
+        'STREET_GEOMETRY_UNAVAILABLE',
+        input.emptyDiagnostics,
+        entry.title,
+        null,
+        'STREET',
+        'OSM',
+        'AMBIGUOUS',
+      );
+    }
+
+    if (entry.streetGeometry !== undefined) {
+      parts = configuredStreetGeometryParts(entry.streetGeometry);
+      coordinateSource =
+        entry.provenance?.geometrySource === 'OSM'
+          ? 'IMPORTED_LOCAL'
+          : 'VERIFIED_LOCAL';
+    } else {
+      const geometry = await this.streetGeometryProvider.resolve({
+        cityId: input.cityId,
+        canonicalLocation: entry.id,
+        displayName: entry.title,
+      });
+
+      if (geometry.status !== 'RESOLVED') {
+        geometryStatus = geometry.status;
+        return notFound(
+          input.normalizedInput,
+          'STREET_GEOMETRY_UNAVAILABLE',
+          input.emptyDiagnostics,
+          entry.title,
+          null,
+          'STREET',
+          'OSM',
+          geometry.status,
+        );
+      }
+
+      parts = streetPartsForGeometry(geometry.geometry);
+      geometryProvider = 'OSM';
+      coordinateSource = 'OSM';
+      confidence = Math.min(confidence, geometry.confidence);
+    }
+
+    const eligibleParts = parts.filter((part) =>
+      lineCoordinatesIntersectBounds(part, input.bounds),
+    );
+
+    if (eligibleParts.length === 0) {
+      return notFound(
+        input.normalizedInput,
+        'OUTSIDE_SUPPORTED_AREA',
+        input.emptyDiagnostics,
+        entry.title,
+        null,
+        'STREET',
+        geometryProvider,
+        'NOT_FOUND',
+      );
+    }
+
+    const coordinate =
+      anchor === null
+        ? deterministicStreetPoint(eligibleParts, input.bounds)
+        : projectAnchorToStreet(eligibleParts, anchor, input.bounds);
+
+    if (coordinate === null) {
+      return notFound(
+        input.normalizedInput,
+        anchor === null ? 'OUTSIDE_SUPPORTED_AREA' : 'PARTIAL_STREET_AMBIGUOUS',
+        input.emptyDiagnostics,
+        entry.title,
+        null,
+        'STREET',
+        geometryProvider,
+        anchor === null ? 'NOT_FOUND' : 'AMBIGUOUS',
+      );
+    }
+
+    return {
+      status: 'RESOLVED',
+      canonicalTitle: entry.title,
+      normalizedQuery: normalizeLocationQuery(entry.title),
+      latitude: coordinate[1],
+      longitude: coordinate[0],
+      confidence,
+      coordinateSource,
+      geometry: { type: 'Point', coordinates: coordinate },
+      precision: 'STREET',
+      geometryProvider,
+      geometryStatus,
+      resolutionMethod: 'PARTIAL_STREET',
+      resolutionReason,
+      ...input.emptyDiagnostics,
+      source: 'LOCAL',
+      localLocationId: entry.id,
+      matchedAlias,
+    };
+  }
+
   async resolveParserResult(
     parserResult: TelegramLocationParserResultInput,
     cityId = TELEGRAM_LOCATION_RESOLVER_CITY_ID,
@@ -653,6 +813,195 @@ const resolveLocalDictionaryMatch = (
       : null,
   };
 };
+
+const findPartialStreetMatch = (
+  locations: readonly CityLocationConfig[],
+  normalizedInput: string,
+): PartialStreetMatch => {
+  const searchableInput = normalizeLocationQuery(normalizedInput).replace(
+    /[,;/]+/gu,
+    ' ',
+  );
+
+  // Intersections and explicitly listed places must follow the regular
+  // resolver path; partial street fallback must never collapse them.
+  if (/(?:\sи\s|перекресток|перекрёсток|\/|&)/u.test(normalizedInput)) {
+    return null;
+  }
+  const streetMatches = new Map<
+    string,
+    {
+      readonly entry: CityLocationConfig;
+      readonly alias: string;
+    }
+  >();
+
+  for (const entry of locations) {
+    if (entry.kind !== 'STREET') continue;
+
+    for (const alias of entry.aliases) {
+      for (const fragment of streetAliasFragments(alias)) {
+        if (containsLocationPhrase(searchableInput, fragment)) {
+          streetMatches.set(entry.id, { entry, alias: fragment });
+        }
+      }
+    }
+  }
+
+  if (streetMatches.size === 0) return null;
+  if (streetMatches.size > 1) return { status: 'AMBIGUOUS' };
+
+  const streetMatch = [...streetMatches.values()][0];
+  if (streetMatch === undefined) return null;
+
+  const nonStreetMatches = new Map<string, CityLocationConfig>();
+
+  for (const entry of locations) {
+    if (entry.kind === 'STREET') continue;
+
+    if (
+      entry.aliases.some((alias) =>
+        containsLocationPhrase(searchableInput, normalizeAliasPhrase(alias)),
+      )
+    ) {
+      nonStreetMatches.set(entry.id, entry);
+    }
+  }
+
+  if (nonStreetMatches.size > 1) return { status: 'AMBIGUOUS' };
+
+  const referencedLocation = [...nonStreetMatches.values()][0];
+  let anchor: CityCoordinate | null = null;
+
+  if (referencedLocation !== undefined) {
+    anchor =
+      referencedLocation.verifiedCoordinates ??
+      referencedLocation.representativePoint ??
+      referencedLocation.areaGeometry?.representativePoint ??
+      null;
+
+    if (anchor === null) return { status: 'AMBIGUOUS' };
+  }
+
+  const residual = searchableInput
+    .replace(
+      new RegExp(`(?:^|\\s)${escapeRegExp(streetMatch.alias)}(?:$|\\s)`, 'u'),
+      ' ',
+    )
+    .replace(
+      /(?<![\p{L}\p{N}])(?:улица|улицы|ул|на|у|в|около|возле|остановка|остановке|остановки|какой|какая|какую|то|там|здесь)(?![\p{L}\p{N}])/gu,
+      ' ',
+    )
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+  return {
+    status: 'MATCH',
+    entry: streetMatch.entry,
+    matchedAlias: streetMatch.alias,
+    anchor,
+    resolutionReason:
+      anchor !== null
+        ? 'KNOWN_ANCHOR_PROJECTED'
+        : residual.length > 0
+          ? 'UNRESOLVED_QUALIFIER'
+          : 'STREET_ONLY_FALLBACK',
+  };
+};
+
+const streetAliasFragments = (alias: string): readonly string[] => {
+  const normalized = normalizeAliasPhrase(alias);
+  const withoutPrefix = normalized.replace(/^(?:улица|ул)\s+/u, '');
+  const withoutSuffix = withoutPrefix.replace(/\s+(?:улица|ул)$/u, '');
+
+  return [...new Set([normalized, withoutPrefix, withoutSuffix])].filter(
+    (fragment) => fragment.length >= 3,
+  );
+};
+
+const normalizeAliasPhrase = (alias: string): string =>
+  normalizeLocationQuery(alias)
+    .replace(/[,;/]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+const containsLocationPhrase = (text: string, phrase: string): boolean => {
+  const escaped = escapeRegExp(phrase);
+  return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, 'u').test(text);
+};
+
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+const deterministicStreetPoint = (
+  parts: readonly (readonly [number, number][])[],
+  bounds: CityBounds,
+): [number, number] | null => {
+  const byLength = parts
+    .map((part) => ({ part, length: streetPartLengthMeters(part) }))
+    .filter(({ part, length }) => part.length >= 2 && length > 0)
+    .sort((left, right) => right.length - left.length);
+
+  for (const { part, length } of byLength) {
+    const midpoint = coordinateAtDistance(part, length / 2);
+    if (
+      midpoint !== null &&
+      isCoordinateInsideBounds(midpoint[1], midpoint[0], bounds)
+    ) {
+      return midpoint;
+    }
+
+    const inBoundsVertices = part.filter(([longitude, latitude]) =>
+      isCoordinateInsideBounds(latitude, longitude, bounds),
+    );
+    const inBoundsMiddle =
+      inBoundsVertices[Math.floor(inBoundsVertices.length / 2)];
+    if (inBoundsMiddle !== undefined) return inBoundsMiddle;
+  }
+
+  return null;
+};
+
+const projectAnchorToStreet = (
+  parts: readonly (readonly [number, number][])[],
+  anchor: CityCoordinate,
+  bounds: CityBounds,
+): [number, number] | null => {
+  if (!isCoordinateInsideBounds(anchor.latitude, anchor.longitude, bounds)) {
+    return null;
+  }
+
+  const projection = nearestStreetProjection(parts, anchor);
+  if (
+    projection === null ||
+    projection.distanceToTargetMeters >
+      TELEGRAM_PARTIAL_STREET_ANCHOR_MAX_DISTANCE_METERS
+  ) {
+    return null;
+  }
+
+  const coordinate = coordinateAtDistance(
+    projection.part,
+    projection.distanceAlongMeters,
+  );
+
+  return coordinate !== null &&
+    isCoordinateInsideBounds(coordinate[1], coordinate[0], bounds)
+    ? coordinate
+    : null;
+};
+
+const streetPartLengthMeters = (part: readonly [number, number][]): number =>
+  part.slice(1).reduce((length, coordinate, index) => {
+    const start = part[index];
+    return start === undefined
+      ? length
+      : length +
+          distanceMeters(
+            coordinateToPosition(start),
+            coordinateToPosition(coordinate),
+          );
+  }, 0);
 
 const getIntersectionSegments = (query: string): readonly string[] =>
   query

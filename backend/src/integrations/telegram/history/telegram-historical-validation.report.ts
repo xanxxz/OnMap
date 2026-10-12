@@ -8,6 +8,7 @@ import type {
   TelegramParserIntent,
   TelegramParserState,
 } from '../parser/telegram-parser.types';
+import { sanitizeTelegramSourceText } from '../../../road-events/telegram-source-text';
 
 const INTENTS: readonly TelegramParserIntent[] = [
   'REPORT',
@@ -153,12 +154,15 @@ export const buildTelegramHistoricalValidationReport = (
         .filter(({ decision }) => decision === 'REVIEW')
         .map((event) => ({
           messageId: message.externalId,
-          text: sanitizeExample(message.text),
+          text: sanitizeTelegramSourceText(message.text) ?? '',
           intent: result.parserResult.intent,
           eventType: result.parserResult.eventType,
           parsedLocations: result.parserResult.locations.map((location) => ({
-            text: location.text,
-            alias: location.alias,
+            text: sanitizeTelegramSourceText(location.text) ?? '',
+            alias:
+              location.alias === null
+                ? null
+                : (sanitizeTelegramSourceText(location.alias) ?? null),
           })),
           contextSource: result.parserResult.contextSource ?? 'NONE',
           contextMessageId: result.parserResult.contextMessageId ?? null,
@@ -226,7 +230,7 @@ const groupUnknownLocations = (
       item.count += 1;
 
       if (item.examples.size < 3) {
-        item.examples.add(sanitizeExample(message.text));
+        item.examples.add(sanitizeTelegramSourceText(message.text) ?? '');
       }
 
       unknown.set(candidate, item);
@@ -235,7 +239,7 @@ const groupUnknownLocations = (
 
   return [...unknown]
     .map(([candidate, item]) => ({
-      candidate,
+      candidate: sanitizeTelegramSourceText(candidate) ?? '',
       count: item.count,
       examples: [...item.examples],
       classification: classifyUnknownCandidate(candidate),
@@ -277,15 +281,6 @@ const classifyUnknownCandidate = (
 
   return 'LIKELY_LOCAL_NAME';
 };
-
-const sanitizeExample = (text: string): string =>
-  text
-    .replace(/https?:\/\/\S+/giu, '[link]')
-    .replace(/@[\p{L}\p{N}_]+/gu, '[user]')
-    .replace(/(?:\+?\d[\s()-]*){7,}/gu, '[number]')
-    .replace(/\s+/gu, ' ')
-    .trim()
-    .slice(0, 120);
 
 const percentage = (count: number, total: number): number =>
   total === 0 ? 0 : Number(((count / total) * 100).toFixed(2));

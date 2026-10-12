@@ -515,9 +515,31 @@ const extractLocations = (
     return { locations: [], direction: null };
   }
 
+  const explicitRussiaLocationId =
+    /(?<![\p{L}\p{N}])кинотеатр(?:а)?\s+россия(?![\p{L}\p{N}])/u.test(text)
+      ? 'cinema-russia'
+      : /(?<![\p{L}\p{N}])улиц(?:а|ы)\s+россия(?![\p{L}\p{N}])/u.test(text)
+        ? 'russia-street-aliases'
+        : null;
+
   return {
     locations: splitLocationCandidates(candidate, dictionary)
-      .map((location) => resolveLocation(location, dictionary))
+      .map((location) => {
+        if (location === 'россия' && explicitRussiaLocationId !== null) {
+          const explicitLocation = dictionary.find(
+            (entry) => entry.id === explicitRussiaLocationId,
+          );
+
+          if (explicitLocation !== undefined) {
+            return {
+              text: explicitLocation.title,
+              alias: explicitLocation.id,
+            };
+          }
+        }
+
+        return resolveLocation(location, dictionary);
+      })
       .filter((location): location is LocationMatch => location !== null),
     direction: null,
   };
@@ -838,8 +860,15 @@ const isSafeIndependentAliasPair = (
 const findLocationAlias = (
   dictionary: readonly CityLocationConfig[],
   normalizedLocation: string,
-): CityLocationConfig | undefined =>
-  dictionary.find((entry) => entry.aliases.includes(normalizedLocation));
+): CityLocationConfig | undefined => {
+  // “Россия” names both a street and a cinema in Balakovo. A bare mention
+  // is not sufficient evidence to choose either one.
+  if (normalizedLocation === 'россия') {
+    return undefined;
+  }
+
+  return dictionary.find((entry) => entry.aliases.includes(normalizedLocation));
+};
 
 const buildResult = (input: {
   eventType: TelegramParserEventType;

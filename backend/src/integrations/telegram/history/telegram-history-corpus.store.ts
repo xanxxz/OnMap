@@ -1,15 +1,36 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { TelegramMessage } from '../telegram.types';
 import type { TelegramHistoryCorpusMetadata } from './telegram-history.types';
 
 export class TelegramHistoryCorpusStore {
+  constructor(private readonly now: () => Date = () => new Date()) {}
+
   async read(corpusPath: string): Promise<readonly TelegramMessage[]> {
+    return (await this.readEntries(corpusPath)).map(({ message }) => message);
+  }
+
+  async readEntries(
+    corpusPath: string,
+  ): Promise<readonly TelegramHistoryCorpusEntry[]> {
     let content: string;
+    let legacySavedAt: string;
 
     try {
-      content = await readFile(corpusPath, 'utf8');
+      const [fileContent, fileStats] = await Promise.all([
+        readFile(corpusPath, 'utf8'),
+        stat(corpusPath),
+      ]);
+      content = fileContent;
+      legacySavedAt = fileStats.mtime.toISOString();
     } catch (error: unknown) {
       if (isMissingFile(error)) {
         return [];
@@ -21,7 +42,7 @@ export class TelegramHistoryCorpusStore {
     return content
       .split('\n')
       .filter((line) => line.trim().length > 0)
-      .map((line) => parseCorpusLine(line));
+      .map((line) => parseCorpusLine(line, legacySavedAt));
   }
 
   async readMetadata(
@@ -47,56 +68,100 @@ export class TelegramHistoryCorpusStore {
     metadata: TelegramHistoryCorpusMetadata,
   ): Promise<void> {
     await Promise.all([
-      mkdir(dirname(corpusPath), { recursive: true }),
-      mkdir(dirname(metadataPath), { recursive: true }),
+      mkdir(dirname(corpusPath), { recursive: true, mode: 0o700 }),
+      mkdir(dirname(metadataPath), { recursive: true, mode: 0o700 }),
+    ]);
+    await Promise.all([
+      chmod(dirname(corpusPath), 0o700).catch(() => undefined),
+      chmod(dirname(metadataPath), 0o700).catch(() => undefined),
     ]);
 
     const corpusTemporaryPath = `${corpusPath}.tmp`;
     const metadataTemporaryPath = `${metadataPath}.tmp`;
-    const corpus = messages.map(toCorpusLine).join('\n');
+    const existingEntries = await this.readEntries(corpusPath);
+    const existingByExternalId = new Map(
+      existingEntries.map((entry) => [entry.message.externalId, entry]),
+    );
+    const savedAt = this.now().toISOString();
+    const corpus = messages
+      .map((message) => {
+        const existing = existingByExternalId.get(message.externalId);
+        const sameVersion =
+          existing !== undefined &&
+          (existing.message.editedAt ?? existing.message.publishedAt) ===
+            (message.editedAt ?? message.publishedAt);
+
+        return toCorpusLine({
+          message,
+          savedAt: sameVersion ? existing.savedAt : savedAt,
+        });
+      })
+      .join('\n');
 
     await Promise.all([
-      writeFile(
-        corpusTemporaryPath,
-        corpus.length === 0 ? '' : `${corpus}\n`,
-        'utf8',
-      ),
+      writeFile(corpusTemporaryPath, corpus.length === 0 ? '' : `${corpus}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      }),
       writeFile(
         metadataTemporaryPath,
         `${JSON.stringify(metadata, null, 2)}\n`,
-        'utf8',
+        { encoding: 'utf8', mode: 0o600 },
       ),
     ]);
     await Promise.all([
       rename(corpusTemporaryPath, corpusPath),
       rename(metadataTemporaryPath, metadataPath),
     ]);
+    await Promise.all([chmod(corpusPath, 0o600), chmod(metadataPath, 0o600)]);
   }
 }
 
-const toCorpusLine = (message: TelegramMessage): string =>
+export interface TelegramHistoryCorpusEntry {
+  readonly message: TelegramMessage;
+  readonly savedAt: string;
+}
+
+export const toCorpusLine = (entry: TelegramHistoryCorpusEntry): string =>
   JSON.stringify({
-    externalId: message.externalId,
-    source: message.source,
-    cityId: message.cityId,
-    chatId: message.chatId,
-    text: message.text,
-    publishedAt: message.publishedAt,
-    ...(message.editedAt === undefined ? {} : { editedAt: message.editedAt }),
-    ...(message.replyToExternalId === undefined
+    externalId: entry.message.externalId,
+    source: entry.message.source,
+    cityId: entry.message.cityId,
+    chatId: entry.message.chatId,
+    text: entry.message.text,
+    publishedAt: entry.message.publishedAt,
+    savedAt: entry.savedAt,
+    ...(entry.message.editedAt === undefined
       ? {}
-      : { replyToExternalId: message.replyToExternalId }),
-    rawSourceType: message.rawSourceType,
+      : { editedAt: entry.message.editedAt }),
+    ...(entry.message.replyToExternalId === undefined
+      ? {}
+      : { replyToExternalId: entry.message.replyToExternalId }),
+    rawSourceType: entry.message.rawSourceType,
   });
 
-const parseCorpusLine = (line: string): TelegramMessage => {
+const parseCorpusLine = (
+  line: string,
+  legacySavedAt: string,
+): TelegramHistoryCorpusEntry => {
   const value: unknown = JSON.parse(line);
 
   if (!isCorpusMessage(value)) {
     throw new Error('INVALID_TELEGRAM_CORPUS_LINE');
   }
 
-  return value;
+  const candidate = value as Partial<TelegramMessage> & { savedAt?: unknown };
+  const message = { ...candidate };
+  delete message.savedAt;
+
+  return {
+    message: message as TelegramMessage,
+    savedAt:
+      typeof candidate.savedAt === 'string' &&
+      Number.isFinite(Date.parse(candidate.savedAt))
+        ? candidate.savedAt
+        : legacySavedAt,
+  };
 };
 
 const isCorpusMessage = (value: unknown): value is TelegramMessage => {

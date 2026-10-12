@@ -5,7 +5,7 @@ import {
   type Worksheet,
   Workbook,
 } from 'exceljs';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import {
@@ -136,7 +136,8 @@ export const exportTelegramReviewLogs = async (
   let malformedLines = 0;
   let duplicatesSkipped = 0;
 
-  await mkdir(outputDirectory, { recursive: true });
+  await mkdir(outputDirectory, { recursive: true, mode: 0o700 });
+  await chmod(outputDirectory, 0o700).catch(() => undefined);
 
   for (const category of CATEGORIES) {
     const source = await readNdjson(
@@ -153,6 +154,7 @@ export const exportTelegramReviewLogs = async (
   const workbook = createWorkbook(exported, unknownLocations);
 
   await workbook.xlsx.writeFile(outputFile);
+  await chmod(outputFile, 0o600);
   await Promise.all(
     LEGACY_CSV_FILE_NAMES.map((fileName) =>
       rm(resolve(outputDirectory, fileName), { force: true }),

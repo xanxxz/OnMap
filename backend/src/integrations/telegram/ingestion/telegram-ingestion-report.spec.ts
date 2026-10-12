@@ -63,7 +63,7 @@ const reportEntry = (event: NormalizedTelegramEvent) => {
     source: 'TELEGRAM',
     cityId: event.cityId,
     chatId: event.sourceChatId,
-    text: 'авария на комарова @participant +79990000000',
+    text: 'авария на комарова @participant +79990000000 t.me/road_chat',
     publishedAt: event.timestamp,
     authorName: 'Private Author',
     rawSourceType: 'message',
@@ -110,8 +110,9 @@ describe('Telegram ingestion dry-run diagnostics', () => {
       decisions: { CREATE: 1, REVIEW: 1 },
       reviewReasons: { LOCATION_AMBIGUOUS: 1 },
     });
-    expect(report.samples.review[0].textExcerpt).toContain('[user]');
-    expect(report.samples.review[0].textExcerpt).toContain('[number]');
+    expect(report.samples.review[0].textExcerpt).toContain('[контакт скрыт]');
+    expect(report.samples.review[0].textExcerpt).toContain('[телефон скрыт]');
+    expect(report.samples.review[0].textExcerpt).toContain('[ссылка скрыта]');
     expect(JSON.stringify(report)).not.toContain('Private Author');
   });
 

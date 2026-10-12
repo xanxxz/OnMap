@@ -153,6 +153,59 @@ describe('TelegramDryRunIngestionPipeline', () => {
     });
   });
 
+  it('carries partial-street provenance and approximate precision into CREATE', async () => {
+    const partialStreet = resolved({
+      geometry: { type: 'Point', coordinates: [47.81, 52.01] },
+      precision: 'STREET',
+      resolutionMethod: 'PARTIAL_STREET',
+      resolutionReason: 'UNRESOLVED_QUALIFIER',
+    });
+    const { pipeline } = setup(parserResult(), [partialStreet]);
+
+    const result = await pipeline.process({ message: message() });
+
+    expect(result.events[0]).toMatchObject({
+      decision: 'CREATE',
+      geometry: { type: 'Point', coordinates: [47.81, 52.01] },
+      locationPrecision: 'STREET',
+      locationResolutionMethod: 'PARTIAL_STREET',
+      locationResolutionReason: 'UNRESOLVED_QUALIFIER',
+    });
+  });
+
+  it.each([
+    ['PARTIAL_STREET_AMBIGUOUS', 'LOCATION_AMBIGUOUS'],
+    ['STREET_GEOMETRY_UNAVAILABLE', 'STREET_GEOMETRY_UNAVAILABLE'],
+    ['OUTSIDE_SUPPORTED_AREA', 'LOCATION_OUTSIDE_SUPPORTED_AREA'],
+  ] as const)(
+    'keeps an unsafe partial street result in REVIEW: %s',
+    async (resolverReason, decisionReason) => {
+      const { pipeline } = setup(parserResult(), [
+        {
+          status: 'NOT_FOUND',
+          normalizedQuery: 'коммунистическая у неизвестной остановки',
+          confidence: null,
+          attemptedQueries: [],
+          queryAttempts: [],
+          rawCandidateCount: 0,
+          acceptedCandidateCount: 0,
+          reason: resolverReason,
+          precision: 'STREET',
+          geometryProvider: null,
+          geometryStatus: null,
+        },
+      ]);
+
+      const result = await pipeline.process({ message: message() });
+
+      expect(result.events[0]).toMatchObject({
+        decision: 'REVIEW',
+        reason: decisionReason,
+        geometry: null,
+      });
+    },
+  );
+
   it('returns REVIEW when a report location is not found', async () => {
     const { pipeline } = setup(parserResult(), [notFound()]);
 
@@ -309,7 +362,7 @@ describe('TelegramDryRunIngestionPipeline', () => {
     expect(resolver.resolveParserResult).not.toHaveBeenCalled();
   });
 
-  it('handles explicit multiple report locations independently', async () => {
+  it('keeps multiple explicit report locations in review instead of choosing silently', async () => {
     const parsed = parserResult({
       locationText: 'Комарова',
       locations: [
@@ -317,24 +370,16 @@ describe('TelegramDryRunIngestionPipeline', () => {
         { text: 'Мира', alias: 'mira' },
       ],
     });
-    const { pipeline } = setup(parsed, [
-      resolved(),
-      resolved({
-        canonicalTitle: 'Мира',
-        normalizedQuery: 'мира',
-        latitude: 52.03,
-        longitude: 47.81,
-        localLocationId: 'mira',
-      }),
-    ]);
+    const { pipeline, resolver } = setup(parsed, [resolved()]);
 
     const result = await pipeline.process({ message: message() });
 
-    expect(result.events).toHaveLength(2);
-    expect(result.events.map(({ decision }) => decision)).toEqual([
-      'CREATE',
-      'CREATE',
-    ]);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      decision: 'REVIEW',
+      reason: 'MULTI_LOCATION_AMBIGUOUS',
+    });
+    expect(resolver.resolveParserResult).not.toHaveBeenCalled();
   });
 
   it('reviews multiple locations for a non-report intent as ambiguous', async () => {
