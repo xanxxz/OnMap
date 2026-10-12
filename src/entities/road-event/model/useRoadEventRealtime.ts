@@ -27,6 +27,7 @@ import {
 } from './useRoadEvents';
 
 import { dpsActivitySummaryKey } from './useDpsActivitySummary';
+import { roadEventModerationNoticeKey } from './useRoadEventModerationNotices';
 
 export type RealtimeStatus =
   | 'disabled'
@@ -222,6 +223,10 @@ export const useRoadEventRealtime =
           queryClient.invalidateQueries({
             queryKey: dpsActivitySummaryKey(cityId),
           });
+
+          queryClient.invalidateQueries({
+            queryKey: roadEventModerationNoticeKey,
+          });
         };
 
       socket.on(
@@ -256,6 +261,11 @@ export const useRoadEventRealtime =
 
       socket.on(
         ROAD_EVENT_REALTIME_EVENTS.resolved,
+        handleResolved,
+      );
+
+      socket.on(
+        ROAD_EVENT_REALTIME_EVENTS.hidden,
         handleResolved,
       );
 
@@ -315,6 +325,11 @@ export const useRoadEventRealtime =
 
         socket.off(
           ROAD_EVENT_REALTIME_EVENTS.resolved,
+          handleResolved,
+        );
+
+        socket.off(
+          ROAD_EVENT_REALTIME_EVENTS.hidden,
           handleResolved,
         );
 

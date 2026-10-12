@@ -57,6 +57,48 @@ describe('requestFreshUserLocation', () => {
     expect(manager.removeListener).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts a fresh MapLibre iOS timestamp in Unix seconds', async () => {
+    const now = 1_780_000_000_000;
+    const manager = createManager();
+    const request = requestFreshUserLocation('granted', manager, () => now, 1_000);
+    manager.emit({
+      coords: {longitude: 47.8, latitude: 52.02, accuracy: 10},
+      timestamp: now / 1000,
+    });
+    await expect(request).resolves.toMatchObject({status: 'READY', coordinate: [47.8, 52.02]});
+  });
+
+  it('requests permission on the first location action before listening', async () => {
+    const now = 1_000_000;
+    const manager = createManager(true);
+    const request = requestFreshUserLocation(
+      'notDetermined',
+      manager,
+      () => now,
+      1_000,
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(manager.requestPermissions).toHaveBeenCalledTimes(1);
+    expect(manager.addListener).toHaveBeenCalledTimes(1);
+    manager.emit({
+      coords: {longitude: 47.8, latitude: 52.02, accuracy: 20},
+      timestamp: now,
+    });
+
+    await expect(request).resolves.toMatchObject({status: 'READY'});
+  });
+
+  it('does not retry a refused system permission while placing an event', async () => {
+    const manager = createManager();
+    await expect(requestFreshUserLocation('denied', manager)).resolves.toEqual({
+      status: 'PERMISSION_DENIED',
+    });
+    expect(manager.requestPermissions).not.toHaveBeenCalled();
+    expect(manager.addListener).not.toHaveBeenCalled();
+  });
+
   it('waits for a delayed accurate fix instead of accepting a rough one', async () => {
     const now = 1_000_000;
     const manager = createManager();
@@ -80,6 +122,32 @@ describe('requestFreshUserLocation', () => {
       status: 'READY',
       coordinate: [47.8, 52.02],
       accuracy: 18,
+    });
+  });
+
+  it('uses a more precise coordinate that arrives shortly after a usable fix', async () => {
+    const now = 1_000_000;
+    const manager = createManager();
+    const request = requestFreshUserLocation(
+      'granted',
+      manager,
+      () => now,
+      1_000,
+    );
+
+    manager.emit({
+      coords: {longitude: 47.8, latitude: 52.02, accuracy: 35},
+      timestamp: now,
+    });
+    manager.emit({
+      coords: {longitude: 47.8001, latitude: 52.0201, accuracy: 9},
+      timestamp: now,
+    });
+
+    await expect(request).resolves.toEqual({
+      status: 'READY',
+      coordinate: [47.8001, 52.0201],
+      accuracy: 9,
     });
   });
 
@@ -134,5 +202,33 @@ describe('requestFreshUserLocation', () => {
       requestFreshUserLocation('denied', manager, Date.now, 100),
     ).resolves.toEqual({status: 'PERMISSION_DENIED'});
     expect(manager.addListener).not.toHaveBeenCalled();
+  });
+
+  it('returns unavailable when the native location subscription cannot start', async () => {
+    const manager = createManager();
+    manager.addListener.mockImplementation(() => {
+      throw new Error('native location unavailable');
+    });
+
+    await expect(
+      requestFreshUserLocation('granted', manager, Date.now, 100),
+    ).resolves.toEqual({status: 'UNAVAILABLE'});
+  });
+
+  it('removes the one-shot listener when the screen/app stops tracking', async () => {
+    const manager = createManager();
+    const controller = new AbortController();
+    const request = requestFreshUserLocation(
+      'granted',
+      manager,
+      Date.now,
+      1_000,
+      controller.signal,
+    );
+
+    controller.abort();
+
+    await expect(request).resolves.toEqual({status: 'UNAVAILABLE'});
+    expect(manager.removeListener).toHaveBeenCalledTimes(1);
   });
 });

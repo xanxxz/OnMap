@@ -1,6 +1,8 @@
 import {RoadEventReadType} from '../../model/roadEvent';
 
-import {EVENT_MARKER_VISUAL_CONFIG} from './eventMarkerVisualConfig';
+import {
+  getEventMarkerVisualConfig,
+} from './eventMarkerVisualConfig';
 
 const TYPES: RoadEventReadType[] = [
   'ROAD_PATROL',
@@ -8,29 +10,53 @@ const TYPES: RoadEventReadType[] = [
   'ROADWORKS',
   'ROAD_CLOSURE',
   'ROAD_HAZARD',
+  'HAZARD',
   'TRAFFIC',
+  'TRAFFIC_JAM',
   'TRAFFIC_LIGHT',
   'ROAD_SERVICE',
   'OTHER',
 ];
 
-describe('EVENT_MARKER_VISUAL_CONFIG', () => {
-  it('defines shape, color, glyph and accessibility semantics for every mobile event type', () => {
+describe('event marker illustration config', () => {
+  it('registers an illustration for every mobile and TomTom event type', () => {
     TYPES.forEach(type => {
-      expect(EVENT_MARKER_VISUAL_CONFIG[type]).toEqual(
-        expect.objectContaining({
-          shape: expect.any(String),
-          color: expect.stringMatching(/^#/),
-          glyph: expect.any(String),
-          accessibilityName: expect.any(String),
-        }),
-      );
+      expect(getEventMarkerVisualConfig(type).source).toBeTruthy();
     });
   });
 
-  it('uses a unique silhouette for each principal road-event category', () => {
-    const shapes = TYPES.map(type => EVENT_MARKER_VISUAL_CONFIG[type].shape);
+  it('maps provider aliases to the matching illustrated PNG', () => {
+    expect(getEventMarkerVisualConfig('TRAFFIC_JAM').source).toBe(
+      getEventMarkerVisualConfig('TRAFFIC').source,
+    );
+    expect(getEventMarkerVisualConfig('HAZARD').source).toBe(
+      getEventMarkerVisualConfig('ROAD_HAZARD').source,
+    );
+  });
 
-    expect(new Set(shapes).size).toBe(TYPES.length);
+  it('keeps original proportions for wide traffic and tall traffic-light artwork', () => {
+    const traffic = getEventMarkerVisualConfig('TRAFFIC');
+    const trafficLight = getEventMarkerVisualConfig('TRAFFIC_LIGHT');
+
+    expect(traffic.width / traffic.height).toBeCloseTo(1.5);
+    expect(traffic.anchor).toBe('center');
+    expect(trafficLight.width / trafficLight.height).toBeCloseTo(2 / 3);
+    expect(trafficLight.anchor).toBe('bottom');
+
+    [traffic, trafficLight].forEach(asset => {
+      const visibleWidth = asset.width * asset.artworkWidthRatio;
+      const visibleHeight = asset.height * asset.artworkHeightRatio;
+
+      expect(Math.max(visibleWidth, visibleHeight)).toBeCloseTo(30);
+    });
+  });
+
+  it('sizes the DPS illustration 12–15% larger than a standard square icon', () => {
+    const normalSize = getEventMarkerVisualConfig('ACCIDENT').visibleSize;
+    const patrolSize = getEventMarkerVisualConfig('ROAD_PATROL').visibleSize;
+    const increase = (patrolSize / normalSize - 1) * 100;
+
+    expect(increase).toBeGreaterThanOrEqual(12);
+    expect(increase).toBeLessThanOrEqual(15);
   });
 });

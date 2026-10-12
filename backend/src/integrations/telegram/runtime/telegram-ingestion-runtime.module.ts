@@ -15,6 +15,8 @@ import { TelegramIngestionRuntimeService } from './telegram-ingestion-runtime.se
 import { TelegramRuntimeReviewLogger } from './telegram-runtime-review.logger';
 import { TelegramRuntimeContextStore } from './telegram-runtime-context.store';
 import { TelegramSourceCursorStore } from './telegram-source-cursor.store';
+import { TelegramRetentionCleanupService } from '../retention/telegram-retention-cleanup.service';
+import { TelegramSingletonLockModule } from '../telegram-singleton-lock.module';
 
 @Module({
   imports: [
@@ -22,6 +24,7 @@ import { TelegramSourceCursorStore } from './telegram-source-cursor.store';
     TelegramPersistenceRealtimeModule,
     TomTomModule,
     RoadEventsModule,
+    TelegramSingletonLockModule,
   ],
   providers: [
     TelegramRuntimeContextStore,
@@ -54,6 +57,7 @@ import { TelegramSourceCursorStore } from './telegram-source-cursor.store';
       ) => new TelegramDryRunIngestionPipeline(parser, resolver),
     },
     TelegramIngestionRuntimeService,
+    TelegramRetentionCleanupService,
   ],
   exports: [TelegramIngestionRuntimeService],
 })

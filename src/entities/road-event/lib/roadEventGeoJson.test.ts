@@ -118,7 +118,6 @@ describe('RoadEvent GeoJSON sources', () => {
           geometry: telegramPoint.geometry,
           properties: expect.objectContaining({
             source: 'TELEGRAM',
-            iconName: 'road-event-roadworks',
             locationPrecision: 'LANDMARK',
           }),
         }),
@@ -145,7 +144,6 @@ describe('RoadEvent GeoJSON sources', () => {
         geometry: tomTomPoint.geometry,
         properties: expect.objectContaining({
           source: 'TOMTOM',
-          iconName: 'road-event-roadworks',
         }),
       }),
     ]);

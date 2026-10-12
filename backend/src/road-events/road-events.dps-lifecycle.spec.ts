@@ -10,6 +10,7 @@ import type { PrismaService } from '../database/prisma.service';
 import type { TomTomTrafficProvider } from '../integrations/tomtom/tomtom-traffic.provider';
 
 import { DpsActivityTracker } from './dps-activity-tracker.service';
+import { expiryAfterSignal } from './road-event-confidence';
 import { ROAD_PATROL_LIFECYCLE } from './road-events.constants';
 import type { RoadEventsGateway } from './realtime/road-events.gateway';
 import { RoadEventsService } from './road-events.service';
@@ -24,10 +25,6 @@ interface DpsPolicyAccess {
     rejectionCount: number,
     confidence: number,
   ): RoadEventStatus;
-  nextConfirmedExpiry(
-    event: { type: 'ROAD_PATROL'; createdAt: Date },
-    confirmedAt: Date,
-  ): Date;
 }
 
 const service = new RoadEventsService(
@@ -45,10 +42,14 @@ describe('DPS lifecycle policy', () => {
     const confirmedAt = new Date('2026-09-21T10:10:00.000Z');
 
     expect(
-      policy.nextConfirmedExpiry(
-        { type: 'ROAD_PATROL', createdAt },
-        confirmedAt,
-      ),
+      expiryAfterSignal({
+        action: 'CONFIRM',
+        type: 'ROAD_PATROL',
+        source: 'USER',
+        createdAt,
+        currentExpiresAt: new Date('2026-09-21T10:20:00.000Z'),
+        now: confirmedAt,
+      }),
     ).toEqual(new Date('2026-09-21T10:30:00.000Z'));
   });
 
@@ -57,10 +58,14 @@ describe('DPS lifecycle policy', () => {
     const confirmedAt = new Date('2026-09-21T11:10:00.000Z');
 
     expect(
-      policy.nextConfirmedExpiry(
-        { type: 'ROAD_PATROL', createdAt },
-        confirmedAt,
-      ),
+      expiryAfterSignal({
+        action: 'CONFIRM',
+        type: 'ROAD_PATROL',
+        source: 'USER',
+        createdAt,
+        currentExpiresAt: new Date('2026-09-21T11:12:00.000Z'),
+        now: confirmedAt,
+      }),
     ).toEqual(new Date('2026-09-21T11:15:00.000Z'));
   });
 

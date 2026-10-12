@@ -6,6 +6,11 @@ import type {
   RoadEventResolvedPayload,
 } from '../../../road-events/road-events.types';
 import { RoadEventsGateway } from '../../../road-events/realtime/road-events.gateway';
+import { sanitizeTelegramSourceText } from '../../../road-events/telegram-source-text';
+import {
+  confidencePercent,
+  visibleRoadEventConfidence,
+} from '../../../road-events/road-event-confidence';
 import type { NormalizedTelegramEvent } from '../ingestion/telegram-ingestion.types';
 
 import { TelegramIngestionPersistenceService } from './telegram-ingestion-persistence.service';
@@ -141,6 +146,16 @@ export class TelegramRoadEventRealtimeBridge {
   private toRealtimePayload(
     row: TelegramRealtimeRow,
   ): RoadEventRealtimePayload {
+    const confidence = visibleRoadEventConfidence({
+      storedConfidence: Number(row.confidence),
+      source: 'TELEGRAM',
+      type: row.type,
+      confirmationCount: Number(row.confirmationCount),
+      rejectionCount: Number(row.rejectionCount),
+      lastConfirmedAt: row.lastConfirmedAt,
+      createdAt: row.createdAt,
+      now: new Date(),
+    });
     return {
       id: row.id,
       source: 'TELEGRAM',
@@ -151,13 +166,15 @@ export class TelegramRoadEventRealtimeBridge {
       ...(row.description === null ? {} : { description: row.description }),
       coordinate: [Number(row.longitude), Number(row.latitude)],
       ...(row.geometry === undefined ? {} : { geometry: row.geometry }),
-      ...(row.sourceText === null ? {} : { sourceText: row.sourceText }),
+      ...(row.sourceText == null
+        ? {}
+        : { sourceText: sanitizeTelegramSourceText(row.sourceText) }),
       ...(row.locationPrecision == null
         ? {}
         : { locationPrecision: row.locationPrecision }),
-      ...(row.locationLabel === null
+      ...(row.locationLabel == null
         ? {}
-        : { locationLabel: row.locationLabel }),
+        : { locationLabel: sanitizeTelegramSourceText(row.locationLabel) }),
       confirmationCount: Number(row.confirmationCount),
       rejectionCount: Number(row.rejectionCount),
       ...(row.lastConfirmedAt === null
@@ -165,7 +182,8 @@ export class TelegramRoadEventRealtimeBridge {
         : {
             lastConfirmedAt: new Date(row.lastConfirmedAt).toISOString(),
           }),
-      confidence: Number(row.confidence),
+      confidence,
+      confidencePercent: confidencePercent(confidence),
       createdAt: new Date(row.createdAt).toISOString(),
       expiresAt: new Date(row.expiresAt).toISOString(),
     };

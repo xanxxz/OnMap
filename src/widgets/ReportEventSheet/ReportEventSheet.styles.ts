@@ -44,23 +44,38 @@ export const styles =
       justifyContent:
         'space-between',
 
-      gap: spacing[10],
+      gap: spacing[6],
     },
 
-    item: {
-      width: '48%',
-
-      minHeight: 78,
-
+    patrolItem: {
+      minHeight: 84,
       flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing[10],
+      paddingHorizontal: spacing[16],
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius[16],
+      backgroundColor: colors.surfaceMuted,
+    },
+    patrolIcon: {marginRight: spacing[16], transform: [{scale: 1.1}]},
+    patrolLabel: {...typography.bodyMedium, color: '#376F8A'},
+    patrolDescription: {...typography.caption, marginTop: spacing[2], color: colors.textSecondary},
+
+    item: {
+      width: '23.5%',
+
+      minHeight: 102,
+
+      flexDirection: 'column',
 
       alignItems: 'center',
 
       paddingHorizontal:
-        spacing[12],
+        spacing[4],
 
       paddingVertical:
-        spacing[12],
+        spacing[8],
 
       borderWidth: 1,
 
@@ -86,11 +101,9 @@ export const styles =
 
     label: {
       ...typography.caption,
-
-      flex: 1,
-
-      marginLeft:
-        spacing[10],
+      fontSize: 11,
+      lineHeight: 14,
+      textAlign: 'center',
 
       color:
         colors.textPrimary,

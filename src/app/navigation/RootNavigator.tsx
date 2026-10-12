@@ -9,6 +9,7 @@ import {
 } from '@react-navigation/native-stack';
 
 import {MapScreen} from '../../screens/MapScreen/MapScreen';
+import {PushRegistrationGate} from '../../features/notifications/PushRegistrationGate';
 
 export type RootStackParamList = {
   Map: undefined;
@@ -20,6 +21,7 @@ const Stack =
 export const RootNavigator = () => {
   return (
     <NavigationContainer>
+      <PushRegistrationGate />
       <Stack.Navigator
         initialRouteName="Map"
         screenOptions={{

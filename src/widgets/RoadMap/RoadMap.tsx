@@ -15,22 +15,25 @@ import {
   Layer,
   Map,
   MapRef,
-  UserLocation,
 } from '@maplibre/maplibre-react-native';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CityConfig, cityBoundsToMapBounds } from '../../shared/config/cities';
+import { CityConfig } from '../../shared/config/cities';
 
-import { RoadEvent } from '../../entities/road-event/model/roadEvent';
+import { RoadEvent, RoadEventType } from '../../entities/road-event/model/roadEvent';
+
+import { RoadEventIcon } from '../../entities/road-event/ui/RoadEventIcon/RoadEventIcon';
 
 import { RoadEventSource } from '../../entities/road-event/ui/RoadEventSource/RoadEventSource';
+import { PartnerPointSource } from '../../entities/partner-placement/ui/PartnerPointSource';
+import type { PartnerPoint } from '../../entities/partner-placement/model/partnerPlacement';
 
 import { DraftLocationMarker } from '../../features/report-event/ui/DraftLocationMarker/DraftLocationMarker';
 
-import { ReportLocationStatus } from '../../features/report-event/model/reportEventDraft';
+import { UserLocationMarker } from '../../features/user-location/ui/UserLocationMarker/UserLocationMarker';
 
-import { LocationPermissionState } from '../../features/user-location/useLocationPermission';
+import { ReportLocationStatus } from '../../features/report-event/model/reportEventDraft';
 
 import { env } from '../../shared/config/env';
 
@@ -47,13 +50,27 @@ interface RoadMapProps {
 
   events: RoadEvent[];
 
+  partnerPoints?: PartnerPoint[];
+
+  selectedPartnerPointId?: string;
+
+  onPartnerPointPress?: (point: PartnerPoint) => void;
+
   selectedEventId?: string;
 
   draftCoordinate: [number, number] | null;
 
   draftLocationStatus?: ReportLocationStatus;
 
-  locationPermission: LocationPermissionState;
+  placementType?: RoadEventType | null;
+
+  onPlacementCenterChange?: (coordinate: [number, number]) => void;
+
+  liveUserLocation: {
+    coordinate: [number, number];
+    accuracy: number | null;
+    stale: boolean;
+  } | null;
 
   onEventPress: (event: RoadEvent) => void;
 
@@ -62,12 +79,40 @@ interface RoadMapProps {
   onViewportChange: (bounds: MapBounds) => void;
 }
 
+/** Visualize the existing rectangular coverage bounds without using them as the city outline. */
+const coverageOutsideMask = (city: CityConfig) => {
+  const {west, south, east, north} = city.coverageBounds;
+  const margin = 5;
+  const rectangle = (left: number, bottom: number, right: number, top: number) => [
+    [[left, bottom], [right, bottom], [right, top], [left, top], [left, bottom]],
+  ];
+  return {
+    type: 'MultiPolygon' as const,
+    coordinates: [
+      rectangle(west - margin, south - margin, west, north + margin),
+      rectangle(east, south - margin, east + margin, north + margin),
+      rectangle(west, south - margin, east, south),
+      rectangle(west, north, east, north + margin),
+    ],
+  };
+};
+
+/** Give the camera a little room beyond the visible working-area edge. */
+export const cameraBoundsWithEdgeRoom = (city: CityConfig): MapBounds => {
+  const {west, south, east, north} = city.coverageBounds;
+  const longitudeRoom = (east - west) * 0.12;
+  const latitudeRoom = (north - south) * 0.12;
+  return [west - longitudeRoom, south - latitudeRoom, east + longitudeRoom, north + latitudeRoom];
+};
+
 export interface RoadMapRef {
   zoomIn: () => Promise<void>;
 
   zoomOut: () => Promise<void>;
 
   focusCoordinate: (coordinate: [number, number]) => Promise<void>;
+
+  getCenter: () => Promise<[number, number] | null>;
 }
 
 const ZOOM_STEP = 1;
@@ -81,10 +126,15 @@ export const RoadMap = forwardRef<RoadMapRef, RoadMapProps>(
     {
       city,
       events,
+      partnerPoints = [],
+      selectedPartnerPointId,
+      onPartnerPointPress,
       selectedEventId,
       draftCoordinate,
       draftLocationStatus = 'IDLE',
-      locationPermission,
+      placementType = null,
+      onPlacementCenterChange,
+      liveUserLocation,
       onEventPress,
       onLongPressCoordinate,
       onViewportChange,
@@ -177,6 +227,8 @@ export const RoadMap = forwardRef<RoadMapRef, RoadMapProps>(
         zoomOut: () => changeZoom(-ZOOM_STEP),
 
         focusCoordinate,
+
+        getCenter: async () => mapRef.current?.getCenter() ?? null,
       }),
       [changeZoom, focusCoordinate],
     );
@@ -229,13 +281,7 @@ export const RoadMap = forwardRef<RoadMapRef, RoadMapProps>(
           doubleTapHoldZoom
           touchRotate
           touchPitch={false}
-          compass
-          compassHiddenFacingNorth
-          compassPosition={{
-            top: insets.top + 64,
-
-            right: 16,
-          }}
+          compass={false}
           logo={false}
           attribution={false}
           onDidFinishLoadingMap={async () => {
@@ -249,6 +295,11 @@ export const RoadMap = forwardRef<RoadMapRef, RoadMapProps>(
             const bounds = event.nativeEvent.bounds;
 
             onViewportChange([bounds[0], bounds[1], bounds[2], bounds[3]]);
+
+            if (placementType && event.nativeEvent.userInteraction) {
+              const [longitude, latitude] = event.nativeEvent.center;
+              onPlacementCenterChange?.([longitude, latitude]);
+            }
           }}
           onLongPress={event => {
             const { lngLat } = event.nativeEvent;
@@ -265,11 +316,33 @@ export const RoadMap = forwardRef<RoadMapRef, RoadMapProps>(
             }}
             minZoom={city.minZoom}
             maxZoom={city.maxZoom}
-            maxBounds={cityBoundsToMapBounds(city.coverageBounds)}
+            maxBounds={cameraBoundsWithEdgeRoom(city)}
           />
 
-          {locationPermission === 'granted' ? (
-            <UserLocation animated accuracy heading minDisplacement={3} />
+          <GeoJSONSource id="working-area-outside-source" data={coverageOutsideMask(city)}>
+            <Layer
+              id="working-area-outside-fill"
+              type="fill"
+              paint={{'fill-color': colors.brandDeepForest, 'fill-opacity': 0.075}}
+            />
+          </GeoJSONSource>
+
+          {city.coverageBoundary ? (
+            <GeoJSONSource id="working-area-edge-source" data={city.coverageBoundary}>
+              <Layer
+                id="working-area-edge-line"
+                type="line"
+                paint={{'line-color': colors.brandForest, 'line-opacity': 0.55, 'line-width': 1.5, 'line-dasharray': [3, 2]}}
+              />
+            </GeoJSONSource>
+          ) : null}
+
+          {liveUserLocation ? (
+            <UserLocationMarker
+              coordinate={liveUserLocation.coordinate}
+              accuracy={liveUserLocation.accuracy}
+              stale={liveUserLocation.stale}
+            />
           ) : null}
 
           {city.displayBoundary ? (
@@ -345,13 +418,31 @@ export const RoadMap = forwardRef<RoadMapRef, RoadMapProps>(
             onEventPress={onEventPress}
           />
 
-          {draftCoordinate ? (
+          <PartnerPointSource
+            points={partnerPoints}
+            selectedPointId={selectedPartnerPointId}
+            onPointPress={point => onPartnerPointPress?.(point)}
+          />
+
+          {draftCoordinate && !placementType ? (
             <DraftLocationMarker
               coordinate={draftCoordinate}
               locationStatus={draftLocationStatus}
             />
           ) : null}
         </Map>
+
+        {placementType ? (
+          <View pointerEvents="none" style={styles.placementTarget} testID="report-placement-target">
+            <View style={styles.placementLabel}>
+              <Text style={styles.placementLabelText}>Точка события</Text>
+            </View>
+            <View style={styles.placementIcon}>
+              <RoadEventIcon type={placementType} compact={false} />
+            </View>
+            <View style={styles.placementCrosshair} />
+          </View>
+        ) : null}
 
         <View
           pointerEvents="none"

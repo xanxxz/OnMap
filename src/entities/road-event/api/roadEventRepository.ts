@@ -4,7 +4,7 @@ import {
 
 import {
   RoadEventFeedbackAction,
-} from '../lib/roadEventFreshness';
+} from '../model/roadEvent';
 
 import {
   RoadEvent,
@@ -50,7 +50,39 @@ export interface RoadEventFeedbackInput {
     RoadEventFeedbackAction;
 }
 
+export type RoadEventReportReason =
+  | 'WRONG_TYPE'
+  | 'WRONG_LOCATION'
+  | 'DUPLICATE'
+  | 'OTHER_ABUSE';
+
+export interface RoadEventReportInput {
+  eventId: string;
+  reason: RoadEventReportReason;
+}
+
+export interface RoadEventReportResult {
+  accepted: true;
+  duplicate: boolean;
+  hidden: boolean;
+}
+
+export interface RoadEventModerationNotice {
+  id: string;
+  eventId: string;
+  type: RoadEventType;
+  createdAt: string;
+  moderationState:
+    | 'PENDING_REVIEW'
+    | 'RESTORED'
+    | 'AUTHOR_RESTRICTED'
+    | 'EXPIRED'
+    | null;
+  eventStatus: string;
+}
+
 export interface RoadEventRepository {
+  getActiveById(id: string, cityId: string): Promise<Exclude<RoadEvent, {source: 'TOMTOM'}>>;
   list(
     params:
       RoadEventListParams,
@@ -65,6 +97,12 @@ export interface RoadEventRepository {
     input:
       RoadEventFeedbackInput,
   ): Promise<UserRoadEvent | TelegramRoadEvent>;
+
+  report(input: RoadEventReportInput): Promise<RoadEventReportResult>;
+
+  getModerationNotices(): Promise<RoadEventModerationNotice[]>;
+
+  acknowledgeModerationNotice(noticeId: string): Promise<void>;
 
   getDpsActivitySummary(cityId: string): Promise<DpsActivitySummary>;
 }

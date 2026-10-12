@@ -28,6 +28,9 @@
     "telegram:ingestion-apply": "npm run --silent build && node dist/scripts/telegram-ingestion-apply.js",
     "telegram:parser-mining": "ts-node scripts/telegram-parser-mining.ts",
     "telegram:review-export": "ts-node src/integrations/telegram/runtime/telegram-review-export.cli.ts",
+    "telegram:moderation-setup": "ts-node scripts/telegram-moderation-setup.ts",
+    "telegram:moderation-smoke": "ts-node scripts/telegram-moderation-smoke.ts",
+    "telegram:retention-dry-run": "npm run --silent build && node dist/scripts/telegram-retention-dry-run.js",
     "telegram:street-geometry-warmup": "ts-node scripts/telegram-street-geometry-warmup.ts",
     "telegram:smoke": "ts-node scripts/telegram-smoke.ts",
     "test": "jest",
@@ -51,6 +54,7 @@
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.34.5",
     "telegram": "^2.26.22"
   },
   "devDependencies": {

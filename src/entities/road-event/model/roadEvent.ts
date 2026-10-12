@@ -19,9 +19,16 @@ export type TomTomRoadEventType =
 
 export type RoadEventReadType = RoadEventType | TomTomRoadEventType;
 
-export type RoadEventStatus = 'ACTIVE' | 'UNCONFIRMED' | 'STALE' | 'RESOLVED';
+export type RoadEventStatus =
+  | 'ACTIVE'
+  | 'UNCONFIRMED'
+  | 'STALE'
+  | 'HIDDEN_PENDING_REVIEW'
+  | 'RESOLVED';
 
 export type RoadEventViewerRelation = 'CREATOR' | 'CONFIRM' | 'REJECT';
+
+export type RoadEventFeedbackAction = 'CONFIRM' | 'REJECT';
 
 export interface RoadEventPointGeometry {
   type: 'Point';
@@ -85,6 +92,8 @@ export interface UserRoadEvent extends RoadEventBase {
 
   confidence: number;
 
+  confidencePercent?: number;
+
   createdAt: string;
 
   expiresAt: string;
@@ -120,6 +129,8 @@ export interface TelegramRoadEvent extends RoadEventBase {
   rejectionCount?: number;
 
   confidence?: number;
+
+  confidencePercent?: number;
 
   viewerRelation?: RoadEventViewerRelation | null;
 }

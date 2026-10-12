@@ -108,6 +108,42 @@ export const styles = StyleSheet.create({
   locationButtonDisabled: {
     opacity: 0.38,
   },
+  bellDome: {
+    width: 18,
+    height: 17,
+    borderWidth: 2,
+    borderBottomWidth: 0,
+    borderColor: colors.primary,
+    borderTopLeftRadius: 9,
+    borderTopRightRadius: 9,
+    marginTop: 2,
+  },
+  bellRim: {
+    width: 23,
+    height: 2,
+    borderRadius: radius.round,
+    backgroundColor: colors.primary,
+  },
+  bellClapper: {
+    width: 6,
+    height: 3,
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 3,
+    backgroundColor: colors.primary,
+  },
+
+  locationHint: {
+    width: 126,
+    marginLeft: -82,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: radius[14],
+    backgroundColor: colors.surfaceGlass,
+    color: colors.textSecondary,
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'center',
+  },
 
   targetOuter: {
     width: 21,

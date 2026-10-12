@@ -6,7 +6,7 @@ jest.mock('./realtime/road-events.gateway', () => ({
   RoadEventsGateway: class {},
 }));
 
-import { ConflictException, HttpException } from '@nestjs/common';
+import { HttpException } from '@nestjs/common';
 
 import type { PrismaService } from '../database/prisma.service';
 
@@ -105,8 +105,20 @@ describe('RoadEventsService anti-spam protection', () => {
     return strings.join(' ').replace(/\s+/g, ' ');
   };
 
+  const runCreateTransaction = (
+    callback: (client: unknown) => Promise<unknown>,
+  ) =>
+    callback({
+      $queryRaw: (strings: readonly string[], ...values: unknown[]) =>
+        strings.join(' ').includes('pg_advisory_xact_lock')
+          ? Promise.resolve([{ locked: true }])
+          : (prisma.$queryRaw(strings, ...values) as Promise<unknown>),
+    });
+
   beforeEach(() => {
     jest.clearAllMocks();
+
+    prisma.$transaction.mockImplementation(runCreateTransaction);
 
     service = new RoadEventsService(
       prisma as unknown as PrismaService,
@@ -201,21 +213,139 @@ describe('RoadEventsService anti-spam protection', () => {
     });
   });
 
-  it('blocks a similar active event of the same type nearby', async () => {
+  it('counts a nearby same-type report from another identity as confirmation', async () => {
+    const existingId = '00000000-0000-4000-8000-000000000401';
+    const current = {
+      ...eventRow(createDto(), IDENTITY_B),
+      id: existingId,
+      source: 'USER',
+    };
+    const transaction = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([current])
+        .mockResolvedValueOnce([{ action: 'CONFIRM' }])
+        .mockResolvedValueOnce([
+          {
+            ...current,
+            status: 'ACTIVE',
+            confirmationCount: 2,
+            confidence: 0.62,
+            lastConfirmedAt: new Date(),
+          },
+        ]),
+    };
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: existingId }]);
+    prisma.$transaction
+      .mockImplementationOnce(runCreateTransaction)
+      .mockImplementationOnce(
+        (callback: (client: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      );
+
+    await expect(
+      service.create(createDto(), IDENTITY_A),
+    ).resolves.toMatchObject({
+      id: existingId,
+      confirmationCount: 2,
+      viewerRelation: 'CONFIRM',
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastUpdated).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastCreated).not.toHaveBeenCalled();
+    expect(transaction.$queryRaw.mock.calls[2]).toContain(0.62);
+  });
+
+  it('returns the existing event for a repeated confirmed duplicate without voting twice', async () => {
+    const existingId = '00000000-0000-4000-8000-000000000402';
+    const current = {
+      ...eventRow(createDto(), IDENTITY_B),
+      id: existingId,
+      source: 'USER',
+    };
     prisma.$queryRaw.mockResolvedValueOnce([
-      { id: '00000000-0000-4000-8000-000000000401' },
+      { ...current, viewerFeedback: 'CONFIRM' },
     ]);
 
-    const error = await service
-      .create(createDto(), IDENTITY_A)
-      .catch((reason: unknown) => reason);
+    await expect(
+      service.create(createDto(), IDENTITY_A),
+    ).resolves.toMatchObject({
+      id: existingId,
+      viewerRelation: 'CONFIRM',
+      confirmationCount: 1,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastUpdated).not.toHaveBeenCalled();
+  });
 
-    expect(error).toBeInstanceOf(ConflictException);
-    expect((error as ConflictException).getStatus()).toBe(409);
-    expect((error as ConflictException).message).toBe(
-      'Similar active event already exists nearby',
+  it('does not count the creator repeating their own report as a vote', async () => {
+    const existingId = '00000000-0000-4000-8000-000000000403';
+    const current = {
+      ...eventRow(createDto(), IDENTITY_A),
+      id: existingId,
+      source: 'USER',
+    };
+    prisma.$queryRaw.mockResolvedValueOnce([current]);
+
+    await expect(
+      service.create(createDto(), IDENTITY_A),
+    ).resolves.toMatchObject({
+      id: existingId,
+      viewerRelation: 'CREATOR',
+      confirmationCount: 1,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastUpdated).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent same-identity reports so only one marker is inserted', async () => {
+    let queue = Promise.resolve();
+    let inserted = false;
+    let insertCount = 0;
+    const row = eventRow(createDto(), IDENTITY_A);
+    prisma.$transaction.mockImplementation(
+      async (callback: (client: unknown) => Promise<unknown>) => {
+        const previous = queue;
+        let release: () => void = () => undefined;
+        queue = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        await previous;
+        try {
+          return await callback({
+            $queryRaw: (template: readonly string[]) => {
+              const sql = template.join(' ');
+              if (sql.includes('pg_advisory_xact_lock'))
+                return Promise.resolve([{ locked: true }]);
+              if (sql.includes('FOR UPDATE')) return Promise.resolve([row]);
+              if (sql.includes('SELECT') && sql.includes('event.id::text')) {
+                return Promise.resolve(inserted ? [row] : []);
+              }
+              if (sql.includes('INSERT INTO road_events')) {
+                inserted = true;
+                insertCount += 1;
+                return Promise.resolve([row]);
+              }
+              return Promise.resolve([]);
+            },
+          });
+        } finally {
+          release();
+        }
+      },
     );
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+
+    const results = await Promise.allSettled([
+      service.create(createDto(), IDENTITY_A),
+      service.create(createDto(), IDENTITY_A),
+    ]);
+    expect(results.map((result) => result.status)).toEqual([
+      'fulfilled',
+      'fulfilled',
+    ]);
+    expect(insertCount).toBe(1);
+    expect(gateway.broadcastCreated).toHaveBeenCalledTimes(1);
+    expect(gateway.broadcastUpdated).not.toHaveBeenCalled();
   });
 
   it('allows a nearby event of another type', async () => {
@@ -257,10 +387,12 @@ describe('RoadEventsService anti-spam protection', () => {
     };
 
     prisma.$queryRaw.mockResolvedValueOnce([{ id: existingId }]);
-    prisma.$transaction.mockImplementationOnce(
-      (callback: (client: typeof transaction) => Promise<unknown>) =>
-        callback(transaction),
-    );
+    prisma.$transaction
+      .mockImplementationOnce(runCreateTransaction)
+      .mockImplementationOnce(
+        (callback: (client: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      );
 
     await expect(
       service.create(createDto({ type: 'ROAD_PATROL' }), IDENTITY_A),

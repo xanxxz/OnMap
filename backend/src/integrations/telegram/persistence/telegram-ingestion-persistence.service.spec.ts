@@ -198,7 +198,13 @@ describe('TelegramIngestionPersistenceService', () => {
   it('creates an ACTIVE Telegram RoadEvent for a CREATE decision', async () => {
     const { service, queryRaw } = setup();
 
-    await expect(service.apply(normalizedEvent())).resolves.toEqual({
+    await expect(
+      service.apply(
+        normalizedEvent({
+          sourceText: 'другое текстовое содержимое +7 999 111-22-33',
+        }),
+      ),
+    ).resolves.toEqual({
       status: 'CREATED',
       roadEventId: 'created-event',
     });
@@ -243,6 +249,29 @@ describe('TelegramIngestionPersistenceService', () => {
     expect(sql).toContain('source_text');
     expect(insert?.slice(1)).toContain('Комарова притерлись');
     expect(insert?.slice(1)).toContain('STREET');
+  });
+
+  it('stores a contact-redacted sourceText while preserving report context', async () => {
+    const { service, queryRaw } = setup();
+
+    await service.apply(
+      normalizedEvent({
+        locationInput: 'Комарова +7 (999) 123-45-67',
+        canonicalLocationTitle: null,
+        sourceText: 'ДПС на Комарова, звоните +7 (999) 123-45-67 t.me/private',
+      }),
+    );
+
+    const insert = queryRaw.mock.calls.find(([template]) =>
+      sqlText(template).includes('INSERT INTO road_events'),
+    );
+
+    expect(insert?.slice(1)).toContain(
+      'ДПС на Комарова, звоните [телефон скрыт] [ссылка скрыта]',
+    );
+    expect(insert?.slice(1)).toContain('Комарова [телефон скрыт]');
+    expect(insert?.slice(1).join(' ')).not.toContain('123-45-67');
+    expect(insert?.slice(1).join(' ')).not.toContain('t.me/private');
   });
 
   it('refines STREET geometry to LANDMARK on a more precise UPDATE', async () => {
@@ -302,7 +331,7 @@ describe('TelegramIngestionPersistenceService', () => {
   });
 
   it('returns ALREADY_APPLIED for the same persisted message', async () => {
-    const { service, transactionMock } = setup({
+    const { service, transactionMock, queryRaw } = setup({
       appliedRoadEventId: 'event-1',
     });
 
@@ -312,6 +341,11 @@ describe('TelegramIngestionPersistenceService', () => {
       roadEventId: 'event-1',
     });
     expect(transactionMock).toHaveBeenCalledTimes(1);
+    expect(
+      queryRaw.mock.calls.some(([template]) =>
+        sqlText(template).includes('UPDATE road_events'),
+      ),
+    ).toBe(false);
   });
 
   it('treats the same edited version as ALREADY_APPLIED', async () => {
@@ -856,6 +890,12 @@ describe('TelegramIngestionPersistenceService', () => {
         sqlText(template).includes('UPDATE road_events'),
       ),
     ).toBe(true);
+    const updateCall = queryRaw.mock.calls.find(([template]) =>
+      sqlText(template).includes('UPDATE road_events'),
+    );
+    expect(sqlText(updateCall?.[0])).toContain('last_confirmed_at');
+    expect(sqlText(updateCall?.[0])).toContain('confidence = CASE');
+    expect(updateCall?.slice(1)).toContain(0.22);
   });
 
   it('reactivates a stale DPS marker after a fresh Telegram report', async () => {

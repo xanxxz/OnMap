@@ -54,6 +54,30 @@ describe('anonymous identity', () => {
     expect(request.anonymousIdentityId).toBe(expectedIdentityId);
   });
 
+  it('derives unlinkable statistics pseudonyms for different placement scopes', () => {
+    const identityId = identityService.verifyAnonymousIdentity(
+      identityService.issueAnonymousIdentity().token,
+    );
+    const first = identityService.partnerStatisticsPseudonym(
+      identityId,
+      'point-a:POINT_OPEN:',
+    );
+    expect(first).toMatch(/^[a-f0-9]{64}$/u);
+    expect(first).toBe(
+      identityService.partnerStatisticsPseudonym(
+        identityId,
+        'point-a:POINT_OPEN:',
+      ),
+    );
+    expect(first).not.toBe(
+      identityService.partnerStatisticsPseudonym(
+        identityId,
+        'point-b:POINT_OPEN:',
+      ),
+    );
+    expect(first).not.toContain(identityId);
+  });
+
   it.each(['payload', 'signature'] as const)(
     'rejects a token with a changed %s',
     (part) => {

@@ -6,6 +6,7 @@
 .env
 .env.*
 !.env.example
+!.env.production
 
 # Xcode
 #
@@ -87,3 +88,6 @@ runtime-logs/
 
 # react-native-config codegen
 ios/tmp.xcconfig
+
+# Device push provider configuration is supplied locally, never committed.
+android/app/google-services.json

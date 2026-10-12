@@ -1,35 +1,21 @@
+import type {ImageSourcePropType} from 'react-native';
+
 import {RoadEventReadType} from '../../model/roadEvent';
 
-export type EventMarkerShape =
-  | 'SHIELD'
-  | 'DIAMOND'
-  | 'WORK_SIGN'
-  | 'BARRIER'
-  | 'SOFT_TRIANGLE'
-  | 'STACKED_ROAD'
-  | 'ROAD_TILE'
-  | 'TRAFFIC_LIGHT'
-  | 'SERVICE_HEX'
-  | 'PEBBLE';
+type EventMarkerAsset = {
+  source: ImageSourcePropType;
+  width: number;
+  height: number;
+  artworkWidthRatio: number;
+  artworkHeightRatio: number;
+  visibleSize: number;
+  anchor: 'center' | 'bottom';
+};
 
-export type EventMarkerGlyph =
-  | 'BEACON'
-  | 'IMPACT'
-  | 'WORKS'
-  | 'BLOCKED'
-  | 'WARNING'
-  | 'TRAFFIC'
-  | 'ROAD'
-  | 'SIGNAL'
-  | 'SERVICE'
-  | 'MORE';
-
-export interface EventMarkerVisualConfig {
-  shape: EventMarkerShape;
-  color: string;
-  glyph: EventMarkerGlyph;
-  accessibilityName: string;
-}
+type ArtworkBounds = {
+  width: number;
+  height: number;
+};
 
 export const eventMarkerColors = {
   dps: '#376F8A',
@@ -44,78 +30,71 @@ export const eventMarkerColors = {
   other: '#64726C',
 } as const;
 
-export const EVENT_MARKER_VISUAL_CONFIG: Record<
-  RoadEventReadType,
-  EventMarkerVisualConfig
-> = {
-  ROAD_PATROL: {
-    shape: 'SHIELD',
-    color: eventMarkerColors.dps,
-    glyph: 'BEACON',
-    accessibilityName: 'ДПС',
-  },
-  ACCIDENT: {
-    shape: 'DIAMOND',
-    color: eventMarkerColors.accident,
-    glyph: 'IMPACT',
-    accessibilityName: 'ДТП',
-  },
-  ROADWORKS: {
-    shape: 'WORK_SIGN',
-    color: eventMarkerColors.roadworks,
-    glyph: 'WORKS',
-    accessibilityName: 'Дорожные работы',
-  },
-  ROAD_CLOSURE: {
-    shape: 'BARRIER',
-    color: eventMarkerColors.roadClosure,
-    glyph: 'BLOCKED',
-    accessibilityName: 'Перекрытие дороги',
-  },
-  ROAD_HAZARD: {
-    shape: 'SOFT_TRIANGLE',
-    color: eventMarkerColors.hazard,
-    glyph: 'WARNING',
-    accessibilityName: 'Опасность на дороге',
-  },
-  HAZARD: {
-    shape: 'SOFT_TRIANGLE',
-    color: eventMarkerColors.hazard,
-    glyph: 'WARNING',
-    accessibilityName: 'Опасность на дороге',
-  },
-  TRAFFIC: {
-    shape: 'STACKED_ROAD',
-    color: eventMarkerColors.trafficJam,
-    glyph: 'TRAFFIC',
-    accessibilityName: 'Пробка',
-  },
-  TRAFFIC_JAM: {
-    shape: 'STACKED_ROAD',
-    color: eventMarkerColors.trafficJam,
-    glyph: 'TRAFFIC',
-    accessibilityName: 'Пробка',
-  },
-  TRAFFIC_LIGHT: {
-    shape: 'TRAFFIC_LIGHT',
-    color: eventMarkerColors.trafficLight,
-    glyph: 'SIGNAL',
-    accessibilityName: 'Светофор',
-  },
-  ROAD_SERVICE: {
-    shape: 'SERVICE_HEX',
-    color: eventMarkerColors.roadService,
-    glyph: 'SERVICE',
-    accessibilityName: 'Дорожная служба',
-  },
-  OTHER: {
-    shape: 'PEBBLE',
-    color: eventMarkerColors.other,
-    glyph: 'MORE',
-    accessibilityName: 'Дорожное событие',
-  },
+const ICONS = {
+  ACCIDENT: require('../../../../shared/assets/road-event-markers/ACCIDENT.png'),
+  ROAD_CLOSURE: require('../../../../shared/assets/road-event-markers/ROAD_CLOSURE.png'),
+  ROADWORKS: require('../../../../shared/assets/road-event-markers/ROADWORKS.png'),
+  TRAFFIC: require('../../../../shared/assets/road-event-markers/TRAFFIC.png'),
+  ROAD_HAZARD: require('../../../../shared/assets/road-event-markers/ROAD_HAZARD.png'),
+  TRAFFIC_LIGHT: require('../../../../shared/assets/road-event-markers/TRAFFIC_LIGHT.png'),
+  ROAD_SERVICE: require('../../../../shared/assets/road-event-markers/ROAD_SERVICE.png'),
+  ROAD_PATROL: require('../../../../shared/assets/road-event-markers/ROAD_PATROL.png'),
+  OTHER: require('../../../../shared/assets/road-event-markers/OTHER.png'),
+} as const;
+
+const createAsset = (
+  source: ImageSourcePropType,
+  canvasWidth: number,
+  canvasHeight: number,
+  artworkBounds: ArtworkBounds,
+  visibleSize: number,
+  anchor: EventMarkerAsset['anchor'] = 'center',
+): EventMarkerAsset => {
+  const visibleWidthRatio = canvasWidth * artworkBounds.width;
+  const visibleHeightRatio = canvasHeight * artworkBounds.height;
+  const artworkScale = visibleSize / Math.max(visibleWidthRatio, visibleHeightRatio);
+
+  return {
+    source,
+    width: canvasWidth * artworkScale,
+    height: canvasHeight * artworkScale,
+    artworkWidthRatio: artworkBounds.width,
+    artworkHeightRatio: artworkBounds.height,
+    visibleSize,
+    anchor,
+  };
+};
+
+// Artwork bounds are alpha bounds above 8% opacity, measured from the supplied PNGs.
+// Sizing to visibleSize compensates for each illustration's transparent canvas margin.
+const ACCIDENT = createAsset(ICONS.ACCIDENT, 1, 1, {width: 1214 / 1254, height: 735 / 1254}, 30);
+const ROAD_CLOSURE = createAsset(ICONS.ROAD_CLOSURE, 1, 1, {width: 1172 / 1254, height: 1082 / 1254}, 30);
+const ROADWORKS = createAsset(ICONS.ROADWORKS, 1, 1, {width: 1165 / 1254, height: 1119 / 1254}, 30);
+const TRAFFIC = createAsset(ICONS.TRAFFIC, 1.5, 1, {width: 1161 / 1536, height: 855 / 1024}, 30);
+const ROAD_HAZARD = createAsset(ICONS.ROAD_HAZARD, 1, 1, {width: 1219 / 1254, height: 833 / 1254}, 30);
+const TRAFFIC_LIGHT = createAsset(ICONS.TRAFFIC_LIGHT, 2 / 3, 1, {width: 504 / 1024, height: 1399 / 1536}, 30, 'bottom');
+const ROAD_SERVICE = createAsset(ICONS.ROAD_SERVICE, 1, 1, {width: 1210 / 1254, height: 901 / 1254}, 30);
+const ROAD_PATROL = createAsset(ICONS.ROAD_PATROL, 1, 1, {width: 1129 / 1254, height: 1019 / 1254}, 34.2);
+const OTHER = createAsset(ICONS.OTHER, 1, 1, {width: 1058 / 1254, height: 1050 / 1254}, 30);
+
+const EVENT_MARKER_ASSETS: Record<RoadEventReadType, EventMarkerAsset> = {
+  ROAD_PATROL,
+  ACCIDENT,
+  ROAD_CLOSURE,
+  ROADWORKS,
+  TRAFFIC,
+  TRAFFIC_JAM: TRAFFIC,
+  ROAD_HAZARD,
+  HAZARD: ROAD_HAZARD,
+  TRAFFIC_LIGHT,
+  ROAD_SERVICE,
+  OTHER,
 };
 
 export const getEventMarkerVisualConfig = (
   type: RoadEventReadType,
-): EventMarkerVisualConfig => EVENT_MARKER_VISUAL_CONFIG[type];
+): EventMarkerAsset => EVENT_MARKER_ASSETS[type];
+
+export const getEventMarkerAnchor = (
+  type: RoadEventReadType,
+): EventMarkerAsset['anchor'] => EVENT_MARKER_ASSETS[type].anchor;

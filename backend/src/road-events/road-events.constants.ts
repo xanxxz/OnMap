@@ -16,6 +16,7 @@ export const ROAD_EVENT_STATUSES = [
   'ACTIVE',
   'UNCONFIRMED',
   'STALE',
+  'HIDDEN_PENDING_REVIEW',
   'RESOLVED',
 ] as const;
 
@@ -38,37 +39,11 @@ export const ROAD_EVENT_TITLE_BY_TYPE: Record<RoadEventType, string> = {
   OTHER: 'Дорожное событие',
 };
 
-export const ROAD_EVENT_TTL_MINUTES: Record<RoadEventType, number> = {
-  ACCIDENT: 120,
-  ROAD_CLOSURE: 360,
-  ROADWORKS: 720,
-  TRAFFIC: 45,
-  ROAD_HAZARD: 180,
-  TRAFFIC_LIGHT: 120,
-  ROAD_SERVICE: 60,
-  ROAD_PATROL: 20,
-  OTHER: 90,
-};
-
-export const TELEGRAM_EVENT_TTL_MS: Readonly<
-  Partial<Record<RoadEventType, number>>
-> = {
-  ACCIDENT: 3 * 60 * 60_000,
-  TRAFFIC: 60 * 60_000,
-  ROAD_CLOSURE: 6 * 60 * 60_000,
-  ROADWORKS: 12 * 60 * 60_000,
-  ROAD_HAZARD: 2 * 60 * 60_000,
-  ROAD_PATROL: 20 * 60_000,
-  OTHER: 2 * 60 * 60_000,
-};
-
-export const ROAD_PATROL_LIFECYCLE = {
-  rollingTtlMs: 20 * 60_000,
-  maxLifetimeMs: 75 * 60_000,
-  staleAfterMs: 12 * 60_000,
-  staleRejectionCount: 3,
-  resolveRejectionCount: 10,
-} as const;
+export {
+  ROAD_EVENT_USER_TTL_MINUTES as ROAD_EVENT_TTL_MINUTES,
+  ROAD_EVENT_TELEGRAM_TTL_MS as TELEGRAM_EVENT_TTL_MS,
+  ROAD_PATROL_POLICY as ROAD_PATROL_LIFECYCLE,
+} from './road-event-confidence';
 
 export const ROAD_EVENT_LIFECYCLE_INTERVAL_MS = 60_000;
 

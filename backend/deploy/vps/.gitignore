@@ -1,0 +1,5 @@
+.env
+backend.env
+backups/
+*.dump
+*.dump.tmp

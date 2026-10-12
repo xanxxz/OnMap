@@ -44,6 +44,32 @@ export const areMapBoundsEqual = (
   );
 };
 
+/** Keep map data mounted while the camera moves inside a prefetched area. */
+export const expandMapBounds = (bounds: MapBounds): MapBounds => {
+  const longitudePadding = (bounds[2] - bounds[0]) * 0.75;
+  const latitudePadding = (bounds[3] - bounds[1]) * 0.75;
+  return normalizeMapBounds([
+    bounds[0] - longitudePadding,
+    bounds[1] - latitudePadding,
+    bounds[2] + longitudePadding,
+    bounds[3] + latitudePadding,
+  ]);
+};
+
+export const isViewportInsidePrefetch = (
+  viewport: MapBounds,
+  prefetched: MapBounds,
+): boolean => {
+  const longitudeMargin = (prefetched[2] - prefetched[0]) * 0.15;
+  const latitudeMargin = (prefetched[3] - prefetched[1]) * 0.15;
+  return (
+    viewport[0] >= prefetched[0] + longitudeMargin &&
+    viewport[1] >= prefetched[1] + latitudeMargin &&
+    viewport[2] <= prefetched[2] - longitudeMargin &&
+    viewport[3] <= prefetched[3] - latitudeMargin
+  );
+};
+
 export const isCoordinateWithinBounds =
   (
     coordinate: [

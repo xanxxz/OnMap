@@ -31,12 +31,11 @@ export const useCreateRoadEvent =
       },
 
       onSuccess: () => {
-        void queryClient.invalidateQueries(
-          {
-            queryKey:
-              roadEventKeys.all,
-          },
-        );
+        queryClient
+          .invalidateQueries({
+            queryKey: roadEventKeys.all,
+          })
+          .catch(() => undefined);
       },
     });
   };

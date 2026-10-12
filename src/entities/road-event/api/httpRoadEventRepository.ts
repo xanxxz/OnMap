@@ -12,6 +12,9 @@ import {
   DpsActivitySummary,
   RoadEventListParams,
   RoadEventRepository,
+  RoadEventReportInput,
+  RoadEventReportResult,
+  RoadEventModerationNotice,
 } from './roadEventRepository';
 
 import {
@@ -96,6 +99,11 @@ const assertRoadEventList = (
 class HttpRoadEventRepository
   implements RoadEventRepository
 {
+  async getActiveById(id: string, cityId: string): Promise<Exclude<RoadEvent, {source: 'TOMTOM'}>> {
+    return assertPersistedRoadEvent(await httpRequest<unknown>(
+      `/road-events/${encodeURIComponent(id)}?cityId=${encodeURIComponent(cityId)}`,
+    ));
+  }
   async list(
     params:
       RoadEventListParams,
@@ -205,6 +213,51 @@ class HttpRoadEventRepository
 
     return assertPersistedRoadEvent(
       payload,
+    );
+  }
+
+  async report(input: RoadEventReportInput): Promise<RoadEventReportResult> {
+    const payload = await httpRequest<unknown>(
+      `/road-events/${encodeURIComponent(input.eventId)}/report`,
+      { method: 'POST', body: JSON.stringify({ reason: input.reason }) },
+    );
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('accepted' in payload) ||
+      payload.accepted !== true ||
+      !('duplicate' in payload) ||
+      typeof payload.duplicate !== 'boolean' ||
+      !('hidden' in payload) ||
+      typeof payload.hidden !== 'boolean'
+    ) {
+      throw new Error('API returned invalid moderation report result');
+    }
+    return payload as RoadEventReportResult;
+  }
+
+  async getModerationNotices(): Promise<RoadEventModerationNotice[]> {
+    const payload = await httpRequest<unknown>('/road-events/moderation-notices');
+    if (!Array.isArray(payload)) {
+      throw new Error('API returned invalid moderation notice list');
+    }
+    return payload.filter((item): item is RoadEventModerationNotice => {
+      if (typeof item !== 'object' || item === null) return false;
+      return (
+        'id' in item && typeof item.id === 'string' &&
+        'eventId' in item && typeof item.eventId === 'string' &&
+        'type' in item && typeof item.type === 'string' &&
+        'createdAt' in item && typeof item.createdAt === 'string' &&
+        'eventStatus' in item && typeof item.eventStatus === 'string' &&
+        'moderationState' in item
+      );
+    });
+  }
+
+  async acknowledgeModerationNotice(noticeId: string): Promise<void> {
+    await httpRequest<unknown>(
+      `/road-events/moderation-notices/${encodeURIComponent(noticeId)}/ack`,
+      { method: 'POST' },
     );
   }
 

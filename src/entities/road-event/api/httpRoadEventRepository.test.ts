@@ -16,6 +16,7 @@ const roadEvent = {
   confirmationCount: 1,
   rejectionCount: 0,
   confidence: 2 / 3,
+  confidencePercent: 40,
   createdAt: '2026-08-20T12:00:00.000Z',
   expiresAt: '2026-08-20T14:00:00.000Z',
 };
@@ -73,6 +74,18 @@ const telegramEvent = {
 };
 
 describe('HTTP RoadEvent API contract', () => {
+  it('preserves backend trust percentage and expiration without recalculation', async () => {
+    mockHttpRequest.mockResolvedValueOnce([userListEvent]);
+    const events = await roadEventRepository.list({
+      cityId: 'balakovo',
+      bounds: [47.7, 51.9, 47.9, 52.1],
+    });
+    expect(events[0]).toMatchObject({
+      confidencePercent: 40,
+      expiresAt: '2026-08-20T14:00:00.000Z',
+      status: 'UNCONFIRMED',
+    });
+  });
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -88,6 +101,40 @@ describe('HTTP RoadEvent API contract', () => {
     const path = mockHttpRequest.mock.calls[0]?.[0] as string;
 
     expect(path).not.toContain('installationId');
+  });
+
+  it('submits a reason-only report to the persisted event endpoint', async () => {
+    mockHttpRequest.mockResolvedValueOnce({
+      accepted: true,
+      duplicate: false,
+      hidden: false,
+    });
+    await expect(roadEventRepository.report({
+      eventId: 'event-1',
+      reason: 'WRONG_TYPE',
+    })).resolves.toEqual({ accepted: true, duplicate: false, hidden: false });
+    expect(mockHttpRequest).toHaveBeenCalledWith('/road-events/event-1/report', {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'WRONG_TYPE' }),
+    });
+  });
+
+  it('loads moderation notices and acknowledges by notice id', async () => {
+    mockHttpRequest.mockResolvedValueOnce([{
+      id: 'notice-1',
+      eventId: 'event-1',
+      type: 'ACCIDENT',
+      createdAt: '2026-09-27T12:00:00.000Z',
+      moderationState: 'PENDING_REVIEW',
+      eventStatus: 'HIDDEN_PENDING_REVIEW',
+    }]);
+    await expect(roadEventRepository.getModerationNotices()).resolves.toHaveLength(1);
+    mockHttpRequest.mockResolvedValueOnce(null);
+    await roadEventRepository.acknowledgeModerationNotice('notice-1');
+    expect(mockHttpRequest).toHaveBeenLastCalledWith(
+      '/road-events/moderation-notices/notice-1/ack',
+      { method: 'POST' },
+    );
   });
 
   it('parses a unified USER event without changing user fields', async () => {

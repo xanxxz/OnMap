@@ -77,6 +77,8 @@ export interface RoadEventResponse {
 
   confidence: number;
 
+  confidencePercent: number;
+
   createdAt: string;
 
   expiresAt: string;
@@ -164,6 +166,19 @@ export interface RoadEventResolvedPayload {
   cityId: string;
 
   resolvedAt: string;
+}
+
+export interface RoadEventHiddenPayload {
+  id: string;
+  cityId: string;
+  hiddenAt: string;
+}
+
+export interface RoadEventModerationNotice {
+  id: string;
+  eventId: string;
+  type: RoadEventType;
+  createdAt: string;
 }
 
 export interface DpsActivitySummary {

@@ -14,6 +14,9 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 import {
   clearAnonymousIdentityToken,
   getAnonymousIdentityToken,
+  refreshAnonymousIdentityToken,
+  setBeforeAnonymousIdentityReset,
+  subscribeAnonymousIdentityRefresh,
 } from './installationIdentity';
 
 const { mockStorage } = jest.requireMock(
@@ -77,5 +80,22 @@ describe('anonymous identity storage', () => {
     expect(mockStorage.getItem).toHaveBeenCalledTimes(1);
     expect(issueToken).toHaveBeenCalledTimes(1);
     expect(mockStorage.setItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes the old identity before a refresh and notifies device re-registration', async () => {
+    mockStorage.getItem.mockResolvedValue('old-token');
+    const revoke = jest.fn().mockResolvedValue(undefined);
+    const refreshed = jest.fn();
+    setBeforeAnonymousIdentityReset(revoke);
+    const off = subscribeAnonymousIdentityRefresh(refreshed);
+    try {
+      await expect(refreshAnonymousIdentityToken(async () => 'new-token')).resolves.toBe('new-token');
+      expect(revoke).toHaveBeenCalledWith('old-token');
+      expect(mockStorage.removeItem).toHaveBeenCalledWith('anonymousIdentityToken');
+      expect(refreshed).toHaveBeenCalledTimes(1);
+    } finally {
+      off();
+      setBeforeAnonymousIdentityReset(null);
+    }
   });
 });

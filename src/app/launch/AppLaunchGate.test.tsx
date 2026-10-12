@@ -9,10 +9,18 @@ import {
   completeCurrentOnboarding,
   hasCompletedCurrentOnboarding,
 } from './onboardingStorage';
+import {requestLocationPermission} from '../../features/user-location/useLocationPermission';
+import {requestNotificationPermissionOnce} from '../../features/notifications/notificationPermission';
 
 jest.mock('./onboardingStorage', () => ({
   hasCompletedCurrentOnboarding: jest.fn(),
   completeCurrentOnboarding: jest.fn(),
+}));
+jest.mock('../../features/user-location/useLocationPermission', () => ({
+  requestLocationPermission: jest.fn(),
+}));
+jest.mock('../../features/notifications/notificationPermission', () => ({
+  requestNotificationPermissionOnce: jest.fn(),
 }));
 
 jest.mock('../../screens/LaunchScreen/LaunchScreen', () => {
@@ -53,6 +61,8 @@ describe('AppLaunchGate', () => {
     jest.useFakeTimers();
     jest.clearAllMocks();
     mockedComplete.mockResolvedValue(undefined);
+    jest.mocked(requestLocationPermission).mockResolvedValue(true);
+    jest.mocked(requestNotificationPermissionOnce).mockResolvedValue('granted');
   });
 
   afterEach(() => {
@@ -81,6 +91,31 @@ describe('AppLaunchGate', () => {
 
     await flushLaunch();
     expect(renderer.root.findByProps({children: 'map'})).toBeTruthy();
+    expect(requestLocationPermission).not.toHaveBeenCalled();
+    expect(requestNotificationPermissionOnce).not.toHaveBeenCalled();
+  });
+
+  it('waits for the location decision before requesting notifications', async () => {
+    mockedHasCompleted.mockResolvedValue(false);
+    let settleLocation: (granted: boolean) => void = () => undefined;
+    jest.mocked(requestLocationPermission).mockImplementation(() => new Promise(resolve => {
+      settleLocation = resolve;
+    }));
+    act(() => { renderer = create(<AppLaunchGate />); });
+    await flushLaunch();
+
+    let completion: Promise<void> = Promise.resolve();
+    act(() => {
+      completion = renderer.root.findByProps({testID: 'complete-onboarding'}).props.onPress();
+    });
+    expect(requestLocationPermission).toHaveBeenCalledTimes(1);
+    expect(requestNotificationPermissionOnce).not.toHaveBeenCalled();
+    await act(async () => {
+      settleLocation(false);
+      await completion;
+    });
+    expect(requestNotificationPermissionOnce).toHaveBeenCalledTimes(1);
+    expect(renderer.root.findByProps({children: 'map'})).toBeTruthy();
   });
 
   it('persists completion before opening the map', async () => {
@@ -96,6 +131,22 @@ describe('AppLaunchGate', () => {
     });
 
     expect(mockedComplete).toHaveBeenCalledTimes(1);
+    expect(requestLocationPermission).toHaveBeenCalledTimes(1);
+    expect(requestNotificationPermissionOnce).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(requestLocationPermission).mock.invocationCallOrder[0])
+      .toBeLessThan(jest.mocked(requestNotificationPermissionOnce).mock.invocationCallOrder[0]);
+    expect(renderer.root.findByProps({children: 'map'})).toBeTruthy();
+  });
+
+  it('enters the map when both permissions are denied', async () => {
+    mockedHasCompleted.mockResolvedValue(false);
+    jest.mocked(requestLocationPermission).mockResolvedValue(false);
+    jest.mocked(requestNotificationPermissionOnce).mockResolvedValue('denied');
+    act(() => { renderer = create(<AppLaunchGate />); });
+    await flushLaunch();
+    await act(async () => {
+      await renderer.root.findByProps({testID: 'complete-onboarding'}).props.onPress();
+    });
     expect(renderer.root.findByProps({children: 'map'})).toBeTruthy();
   });
 

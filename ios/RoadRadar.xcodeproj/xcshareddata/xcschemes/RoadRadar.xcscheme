@@ -8,7 +8,7 @@
       </BuildActionEntries>
       <PreActions>
          <ExecutionAction ActionType="Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
-            <ActionContent title="Run Script" scriptText="&quot;${SRCROOT}/../node_modules/react-native-config/ios/ReactNativeConfig/BuildXCConfig.rb&quot; &quot;${SRCROOT}/..&quot; &quot;${SRCROOT}/tmp.xcconfig&quot;&#xA;">
+            <ActionContent title="Run Script" scriptText="if [ &quot;$CONFIGURATION&quot; = &quot;Release&quot; ]; then&#xA;  export ENVFILE=&quot;.env.production&quot;&#xA;  node &quot;${SRCROOT}/../scripts/validate-mobile-release-env.js&quot; &quot;${SRCROOT}/../.env.production&quot;&#xA;fi&#xA;&quot;${SRCROOT}/../node_modules/react-native-config/ios/ReactNativeConfig/BuildXCConfig.rb&quot; &quot;${SRCROOT}/..&quot; &quot;${SRCROOT}/tmp.xcconfig&quot;&#xA;">
                <EnvironmentBuildable>
                   <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="13B07F861A680F5B00A75B9A" BuildableName="RoadRadar.app" BlueprintName="RoadRadar" ReferencedContainer="container:RoadRadar.xcodeproj"/>
                </EnvironmentBuildable>

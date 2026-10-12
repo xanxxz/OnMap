@@ -223,6 +223,62 @@ describe('RoadEventsService unified read layer', () => {
     ]);
   });
 
+  it('redacts Telegram contact details and links in the REST read layer', async () => {
+    prisma.$queryRaw.mockResolvedValueOnce([
+      {
+        ...userEventRow(),
+        id: '00000000-0000-4000-8000-000000000507',
+        source: 'TELEGRAM',
+        createdByInstallationId: null,
+        locationLabel: 'Комарова +7 (999) 123-45-67',
+        sourceText:
+          'ДПС на Комарова, звоните +7 (999) 123-45-67 @road_user https://t.me/group',
+      },
+    ]);
+    tomTomTrafficProvider.getIncidents.mockResolvedValueOnce([]);
+
+    const [event] = await service.list(query, IDENTITY_ID);
+
+    expect(event).toEqual(
+      expect.objectContaining({
+        sourceText:
+          'ДПС на Комарова, звоните [телефон скрыт] [контакт скрыт] [ссылка скрыта]',
+        locationLabel: 'Комарова [телефон скрыт]',
+      }),
+    );
+  });
+
+  it('serializes a partial street Point with STREET precision through the REST read layer', async () => {
+    const geometry = {
+      type: 'Point' as const,
+      coordinates: [47.81, 52.01] as [number, number],
+    };
+    prisma.$queryRaw.mockResolvedValueOnce([
+      {
+        ...userEventRow(),
+        id: '00000000-0000-4000-8000-000000000506',
+        source: 'TELEGRAM',
+        createdByInstallationId: null,
+        longitude: 47.81,
+        latitude: 52.01,
+        geometry,
+        locationPrecision: 'STREET',
+        locationLabel: 'Коммунистическая улица',
+      },
+    ]);
+    tomTomTrafficProvider.getIncidents.mockResolvedValueOnce([]);
+
+    await expect(service.list(query, IDENTITY_ID)).resolves.toEqual([
+      expect.objectContaining({
+        source: 'TELEGRAM',
+        geometry,
+        coordinate: [47.81, 52.01],
+        locationPrecision: 'STREET',
+        locationLabel: 'Коммунистическая улица',
+      }),
+    ]);
+  });
+
   it.each(['TIMEOUT', 'HTTP_ERROR'] as const)(
     'returns USER events after a controlled TomTom %s',
     async (code) => {

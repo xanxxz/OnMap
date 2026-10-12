@@ -67,6 +67,15 @@ describe('RoadEventsService create city bounds', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.$transaction.mockImplementation(
+      (callback: (client: unknown) => Promise<unknown>) =>
+        callback({
+          $queryRaw: (strings: readonly string[], ...values: unknown[]) =>
+            strings.join(' ').includes('pg_advisory_xact_lock')
+              ? Promise.resolve([{ locked: true }])
+              : (prisma.$queryRaw(strings, ...values) as Promise<unknown>),
+        }),
+    );
   });
 
   it('accepts a coordinate inside Balakovo', async () => {
@@ -108,6 +117,7 @@ describe('RoadEventsService create city bounds', () => {
     const createQueryCall = prisma.$queryRaw.mock.calls[1] as unknown[];
 
     expect(createQueryCall).toContain(TRUSTED_IDENTITY_ID);
+    expect(createQueryCall).toContain(0.4);
     expect(createQueryCall).not.toContain(SPOOFED_IDENTITY_ID);
   });
 
@@ -230,6 +240,57 @@ describe('RoadEventsService create city bounds', () => {
 
       expect(feedbackQueryCall).toContain(TRUSTED_IDENTITY_ID);
       expect(feedbackQueryCall).not.toContain(SPOOFED_IDENTITY_ID);
+    });
+
+    it('shortens expiry after an accepted negative vote and broadcasts the new state', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-24T12:05:00.000Z'));
+      try {
+        const event = {
+          ...currentEvent(),
+          source: 'USER',
+          type: 'ROAD_PATROL',
+          createdAt: new Date('2026-09-24T12:00:00.000Z'),
+          lastConfirmedAt: new Date('2026-09-24T12:00:00.000Z'),
+          expiresAt: new Date('2026-09-24T12:20:00.000Z'),
+        };
+        const transaction = {
+          $queryRaw: jest
+            .fn()
+            .mockResolvedValueOnce([event])
+            .mockResolvedValueOnce([{ action: 'REJECT' }])
+            .mockResolvedValueOnce([
+              {
+                ...event,
+                rejectionCount: 1,
+                confidence: 0.22,
+                expiresAt: new Date('2026-09-24T12:17:45.000Z'),
+              },
+            ]),
+        };
+        prisma.$transaction.mockImplementationOnce(
+          (callback: (client: typeof transaction) => Promise<unknown>) =>
+            callback(transaction),
+        );
+
+        const result = await service.feedback(
+          event.id,
+          { action: 'REJECT' },
+          TRUSTED_IDENTITY_ID,
+        );
+        expect(result.expiresAt).toBe('2026-09-24T12:17:45.000Z');
+        expect(result.confidencePercent).toBe(15);
+        expect(transaction.$queryRaw.mock.calls[2]).toContainEqual(
+          new Date('2026-09-24T12:17:45.000Z'),
+        );
+        expect(gateway.broadcastUpdated).toHaveBeenCalledWith(
+          expect.objectContaining({
+            confidencePercent: 15,
+            expiresAt: result.expiresAt,
+          }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('cannot bypass self-vote protection with a body installationId', async () => {

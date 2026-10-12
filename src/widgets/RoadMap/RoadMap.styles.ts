@@ -13,6 +13,39 @@ export const styles = StyleSheet.create({
     flex: 1,
   },
 
+  placementTarget: {
+    position: 'absolute',
+    left: '50%',
+    bottom: '50%',
+    width: 120,
+    marginLeft: -60,
+    marginBottom: -5,
+    alignItems: 'center',
+    zIndex: 5,
+  },
+  placementLabel: {
+    paddingHorizontal: spacing[10],
+    paddingVertical: 4,
+    borderRadius: radius.round,
+    backgroundColor: colors.surfaceGlass,
+    ...shadows.floating,
+  },
+  placementLabelText: {
+    ...typography.caption,
+    color: colors.brandDeepForest,
+  },
+  placementIcon: {
+    marginTop: spacing[4],
+  },
+  placementCrosshair: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: colors.surface,
+    backgroundColor: colors.brandForest,
+  },
+
   mapAttribution: {
     position: 'absolute',
 

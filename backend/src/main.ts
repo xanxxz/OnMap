@@ -1,70 +1,57 @@
-import {
-  ValidationPipe,
-} from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 
-import {
-  ConfigService,
-} from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 
-import {
-  NestFactory,
-} from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 
-import {
-  AppModule,
-} from './app.module';
+import { AppModule } from './app.module';
+import { isAllowedOrigin, parseAllowedOrigins } from './cors/allowed-origins';
 
 async function bootstrap() {
-  const app =
-    await NestFactory.create(
-      AppModule,
-    );
+  const app = await NestFactory.create(AppModule);
 
-  const configService =
-    app.get(
-      ConfigService,
-    );
+  const configService = app.get(ConfigService);
 
-  const port =
-    configService.getOrThrow<number>(
-      'PORT',
-    );
+  const port = configService.getOrThrow<number>('PORT');
 
-  app.setGlobalPrefix(
-    'api',
-  );
+  app.setGlobalPrefix('api');
 
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
 
-      forbidNonWhitelisted:
-        true,
+      forbidNonWhitelisted: true,
 
       transform: true,
     }),
   );
 
   app.enableCors({
-    origin: true,
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) =>
+      callback(
+        null,
+        isAllowedOrigin(
+          origin,
+          parseAllowedOrigins(
+            configService.get<string>('CORS_ALLOWED_ORIGINS'),
+          ),
+        ),
+      ),
 
     credentials: true,
   });
 
   app.enableShutdownHooks();
 
-  await app.listen(
-    port,
-    '0.0.0.0',
-  );
+  await app.listen(port, '0.0.0.0');
 
-  console.log(
-    `[RoadRadar] API: http://localhost:${port}/api`,
-  );
+  const url = await app.getUrl();
 
-  console.log(
-    `[RoadRadar] Socket.IO: http://localhost:${port}`,
-  );
+  console.log(`[RoadRadar] API: ${url}/api`);
+  console.log(`[RoadRadar] Socket.IO: ${url}`);
 }
 
 void bootstrap();

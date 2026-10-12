@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 
 import { randomUUID } from 'node:crypto';
+import type { Prisma } from '../generated/prisma/client';
 
 import {
   getCityConfig,
@@ -62,6 +63,16 @@ import {
 
 import { RoadEventsGateway } from './realtime/road-events.gateway';
 import { DpsActivityTracker } from './dps-activity-tracker.service';
+import { sanitizeTelegramSourceText } from './telegram-source-text';
+import {
+  ROAD_EVENT_CONFIDENCE,
+  confidencePercent,
+  confidenceAfterFeedback,
+  expiryAfterSignal,
+  userConfidenceFromVotes,
+  visibleRoadEventConfidence,
+} from './road-event-confidence';
+import { queueRoadEventPush } from '../push/push-queue';
 
 interface FeedbackActionRow {
   action: RoadEventFeedbackAction;
@@ -79,8 +90,8 @@ interface LifecycleRoadEventRow {
   unsupportedType: string | null;
 }
 
-interface SimilarRoadEventRow {
-  id: string;
+interface SimilarRoadEventRow extends RoadEventDbRow {
+  viewerFeedback: RoadEventFeedbackAction | null;
 }
 
 interface RateLimitBucket {
@@ -140,6 +151,7 @@ export class RoadEventsService
     query: ListRoadEventsQueryDto,
 
     identityId: string,
+    exactId?: string,
   ): Promise<RoadEventListItem[]> {
     this.validateCityId(query.cityId);
 
@@ -209,8 +221,13 @@ export class RoadEventsService
             event.city_id =
               ${query.cityId}
 
+            AND (${exactId ?? null}::uuid IS NULL OR event.id = ${exactId ?? null}::uuid)
+
             AND event.status <>
               'RESOLVED'::"RoadEventStatus"
+
+            AND event.status <>
+              'HIDDEN_PENDING_REVIEW'::"RoadEventStatus"
 
             AND event.expires_at >
               NOW()
@@ -233,17 +250,35 @@ export class RoadEventsService
           LIMIT 500
         `;
 
+    const responseTime = new Date();
     const persistedEvents = rows.map((row) => {
-      const event = this.toResponse(row);
+      const event = this.toResponse(row, responseTime);
 
       return row.source === 'TELEGRAM'
         ? toTelegramRoadEventListItem(event)
         : toUserRoadEventListItem(event);
     });
 
-    const tomTomEvents = await this.listTomTomIncidents(query);
+    const tomTomEvents = exactId ? [] : await this.listTomTomIncidents(query);
 
     return [...persistedEvents, ...tomTomEvents];
+  }
+
+  async getActiveById(id: string, cityId: string, identityId: string) {
+    const city = this.validateCityId(cityId);
+    const rows = await this.list(
+      {
+        cityId,
+        west: city.coverageBounds.west,
+        south: city.coverageBounds.south,
+        east: city.coverageBounds.east,
+        north: city.coverageBounds.north,
+      },
+      identityId,
+      id,
+    );
+    if (!rows[0]) throw new NotFoundException('Road event unavailable');
+    return rows[0];
   }
 
   async getDpsActivitySummary(cityId: string): Promise<DpsActivitySummary> {
@@ -257,6 +292,7 @@ export class RoadEventsService
       WHERE city_id = ${cityId}
         AND type = 'ROAD_PATROL'::"RoadEventType"
         AND status <> 'RESOLVED'::"RoadEventStatus"
+        AND status <> 'HIDDEN_PENDING_REVIEW'::"RoadEventStatus"
         AND expires_at > NOW()
     `;
     const onMap = Number(rows[0]?.count ?? 0);
@@ -286,21 +322,6 @@ export class RoadEventsService
       'Road event creation rate limit exceeded',
     );
 
-    const similarEventId = await this.findSimilarActiveEvent(
-      dto.cityId,
-      dto.type,
-      longitude,
-      latitude,
-    );
-
-    if (similarEventId !== null) {
-      if (dto.type === 'ROAD_PATROL') {
-        return this.feedback(similarEventId, { action: 'CONFIRM' }, identityId);
-      }
-
-      throw new ConflictException('Similar active event already exists nearby');
-    }
-
     const id = randomUUID();
 
     const now = new Date();
@@ -311,9 +332,33 @@ export class RoadEventsService
 
     const title = dto.title?.trim() || ROAD_EVENT_TITLE_BY_TYPE[dto.type];
 
-    const confidence = this.calculateConfidence(1, 0);
+    const confidence = userConfidenceFromVotes(1, 0);
 
-    const rows = await this.prisma.$queryRaw<RoadEventDbRow[]>`
+    const result = await this.prisma.$transaction(async (transaction) => {
+      // A transaction-scoped city/type lock serializes the nearby check and insert.
+      // This prevents two simultaneous reports from creating separate markers.
+      await transaction.$queryRaw<readonly { locked: boolean }[]>`
+        SELECT pg_advisory_xact_lock(hashtext(${`${dto.cityId}:${dto.type}`})) IS NULL AS locked
+      `;
+      const similarEvent = await this.findSimilarActiveEvent(
+        dto.cityId,
+        dto.type,
+        longitude,
+        latitude,
+        identityId,
+        transaction,
+      );
+      if (similarEvent !== null) {
+        if (similarEvent.createdByInstallationId === identityId) {
+          return { kind: 'already-owned' as const, row: similarEvent };
+        }
+        if (similarEvent.viewerFeedback === 'CONFIRM') {
+          return { kind: 'already-confirmed' as const, row: similarEvent };
+        }
+        return { kind: 'existing' as const, id: similarEvent.id };
+      }
+
+      const rows = await transaction.$queryRaw<RoadEventDbRow[]>`
           INSERT INTO road_events (
             id,
             city_id,
@@ -383,7 +428,32 @@ export class RoadEventsService
               AS "expiresAt"
         `;
 
-    const row = rows[0];
+      if (rows[0] && process.env.PUSH_ENQUEUE_ENABLED === 'true') {
+        await queueRoadEventPush(transaction, {
+          id: rows[0].id,
+          cityId: dto.cityId,
+          type: dto.type,
+        });
+      }
+
+      return { kind: 'created' as const, row: rows[0] };
+    });
+
+    if (result.kind === 'existing') {
+      return this.feedback(result.id, { action: 'CONFIRM' }, identityId);
+    }
+
+    if (
+      result.kind === 'already-owned' ||
+      result.kind === 'already-confirmed'
+    ) {
+      return {
+        ...this.toResponse(result.row),
+        viewerRelation: result.kind === 'already-owned' ? 'CREATOR' : 'CONFIRM',
+      };
+    }
+
+    const row = result.row;
 
     if (!row) {
       throw new Error('Failed to create road event');
@@ -471,6 +541,7 @@ export class RoadEventsService
 
       if (
         current.status === 'RESOLVED' ||
+        current.status === 'HIDDEN_PENDING_REVIEW' ||
         currentExpiresAt.getTime() <= now.getTime()
       ) {
         throw new GoneException('Road event no longer accepts feedback');
@@ -530,15 +601,22 @@ export class RoadEventsService
       const rejectionCount =
         current.rejectionCount + (dto.action === 'REJECT' ? 1 : 0);
 
-      const confidence = this.calculateConfidence(
+      const confidence = confidenceAfterFeedback(
+        current.source ?? 'USER',
+        Number(current.confidence),
         confirmationCount,
         rejectionCount,
+        dto.action,
       );
 
-      const expiresAt =
-        dto.action === 'CONFIRM'
-          ? this.nextConfirmedExpiry(current, now)
-          : currentExpiresAt;
+      const expiresAt = expiryAfterSignal({
+        action: dto.action,
+        type: current.type,
+        source: current.source ?? 'USER',
+        createdAt: current.createdAt,
+        currentExpiresAt,
+        now,
+      });
 
       const lastConfirmedAt =
         dto.action === 'CONFIRM'
@@ -685,38 +763,38 @@ export class RoadEventsService
             CASE type
               WHEN
                 'ACCIDENT'::"RoadEventType"
-                THEN INTERVAL '66 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.ACCIDENT * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'ROAD_CLOSURE'::"RoadEventType"
-                THEN INTERVAL '198 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.ROAD_CLOSURE * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'ROADWORKS'::"RoadEventType"
-                THEN INTERVAL '396 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.ROADWORKS * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'TRAFFIC'::"RoadEventType"
-                THEN INTERVAL '25 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.TRAFFIC * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'ROAD_HAZARD'::"RoadEventType"
-                THEN INTERVAL '99 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.ROAD_HAZARD * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'TRAFFIC_LIGHT'::"RoadEventType"
-                THEN INTERVAL '66 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.TRAFFIC_LIGHT * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'ROAD_SERVICE'::"RoadEventType"
-                THEN INTERVAL '33 minutes'
+                THEN ${ROAD_EVENT_TTL_MINUTES.ROAD_SERVICE * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
 
               WHEN
                 'ROAD_PATROL'::"RoadEventType"
                 THEN ${ROAD_PATROL_LIFECYCLE.staleAfterMs} * INTERVAL '1 millisecond'
 
               ELSE
-                INTERVAL '50 minutes'
+                ${ROAD_EVENT_TTL_MINUTES.OTHER * ROAD_EVENT_CONFIDENCE.staleAgeFraction * 60_000} * INTERVAL '1 millisecond'
             END
       `;
 
@@ -886,12 +964,14 @@ export class RoadEventsService
     longitude: number,
 
     latitude: number,
-  ): Promise<string | null> {
+    identityId: string,
+    transaction: Prisma.TransactionClient,
+  ): Promise<SimilarRoadEventRow | null> {
     const windowMs =
       type === 'ROAD_PATROL'
         ? ROAD_PATROL_LIFECYCLE.maxLifetimeMs
         : ROAD_EVENT_DEDUPLICATION.windowMs;
-    const similarEvents = await this.prisma.$queryRaw<SimilarRoadEventRow[]>`
+    const similarEvents = await transaction.$queryRaw<SimilarRoadEventRow[]>`
           WITH candidate AS (
             SELECT
               ST_SetSRID(
@@ -904,7 +984,30 @@ export class RoadEventsService
           )
 
           SELECT
-            event.id::text AS "id"
+            event.id::text AS "id",
+            event.city_id AS "cityId",
+            event.type::text AS "type",
+            event.source::text AS "source",
+            event.status::text AS "status",
+            event.title,
+            event.description,
+            event.longitude,
+            event.latitude,
+            ST_AsGeoJSON(event.location)::json AS "geometry",
+            event.created_by_installation_id AS "createdByInstallationId",
+            event.confirmation_count AS "confirmationCount",
+            event.rejection_count AS "rejectionCount",
+            event.last_confirmed_at AS "lastConfirmedAt",
+            event.confidence,
+            event.created_at AS "createdAt",
+            event.expires_at AS "expiresAt",
+            (
+              SELECT feedback.action::text
+              FROM road_event_feedback feedback
+              WHERE feedback.road_event_id = event.id
+                AND feedback.installation_id = ${identityId}
+              LIMIT 1
+            ) AS "viewerFeedback"
           FROM road_events event
           CROSS JOIN candidate
           WHERE
@@ -953,7 +1056,7 @@ export class RoadEventsService
           LIMIT 1
         `;
 
-    return similarEvents[0]?.id ?? null;
+    return similarEvents[0] ?? null;
   }
 
   private enforceRateLimit(
@@ -1021,20 +1124,6 @@ export class RoadEventsService
     this.lastRateLimitCleanupAt = now;
   }
 
-  private calculateConfidence(
-    confirmations: number,
-
-    rejections: number,
-  ) {
-    const value = (confirmations + 1) / (confirmations + rejections + 2);
-
-    return Math.min(
-      0.95,
-
-      Math.max(0.05, value),
-    );
-  }
-
   private deriveStatus(
     type: RoadEventType,
 
@@ -1067,15 +1156,24 @@ export class RoadEventsService
       return currentStatus === 'STALE' ? 'STALE' : 'UNCONFIRMED';
     }
 
-    if (rejectionCount >= 3 && confidence <= 0.35) {
+    if (
+      rejectionCount >= ROAD_EVENT_CONFIDENCE.otherResolveRejectionCount &&
+      confidence <= ROAD_EVENT_CONFIDENCE.otherResolveConfidence
+    ) {
       return 'RESOLVED';
     }
 
-    if (rejectionCount >= 2 && confidence < 0.5) {
+    if (
+      rejectionCount >= ROAD_EVENT_CONFIDENCE.otherStaleRejectionCount &&
+      confidence < ROAD_EVENT_CONFIDENCE.otherStaleConfidence
+    ) {
       return 'STALE';
     }
 
-    if (confirmationCount >= 2 && confidence >= 0.6) {
+    if (
+      confirmationCount >= ROAD_EVENT_CONFIDENCE.activeConfirmationCount &&
+      confidence >= ROAD_EVENT_CONFIDENCE.activeConfidence
+    ) {
       return 'ACTIVE';
     }
 
@@ -1084,27 +1182,6 @@ export class RoadEventsService
     }
 
     return 'UNCONFIRMED';
-  }
-
-  private nextConfirmedExpiry(
-    event: Pick<RoadEventDbRow, 'type' | 'createdAt'>,
-    confirmedAt: Date,
-  ): Date {
-    if (event.type !== 'ROAD_PATROL') {
-      return new Date(
-        confirmedAt.getTime() + ROAD_EVENT_TTL_MINUTES[event.type] * 60_000,
-      );
-    }
-
-    const hardLimit =
-      new Date(event.createdAt).getTime() + ROAD_PATROL_LIFECYCLE.maxLifetimeMs;
-
-    return new Date(
-      Math.min(
-        confirmedAt.getTime() + ROAD_PATROL_LIFECYCLE.rollingTtlMs,
-        hardLimit,
-      ),
-    );
   }
 
   private validateCoordinate(
@@ -1195,7 +1272,17 @@ export class RoadEventsService
     }
   }
 
-  private toResponse(row: RoadEventDbRow): RoadEventResponse {
+  private toResponse(row: RoadEventDbRow, now = new Date()): RoadEventResponse {
+    const confidence = visibleRoadEventConfidence({
+      storedConfidence: Number(row.confidence),
+      source: row.source ?? 'USER',
+      type: row.type,
+      confirmationCount: Number(row.confirmationCount),
+      rejectionCount: Number(row.rejectionCount),
+      lastConfirmedAt: row.lastConfirmedAt,
+      createdAt: row.createdAt,
+      now,
+    });
     const response: RoadEventResponse = {
       id: row.id,
 
@@ -1219,7 +1306,9 @@ export class RoadEventsService
 
       ...(row.geometry === undefined ? {} : { geometry: row.geometry }),
 
-      ...(row.sourceText == null ? {} : { sourceText: row.sourceText }),
+      ...(row.sourceText == null || row.source !== 'TELEGRAM'
+        ? {}
+        : { sourceText: sanitizeTelegramSourceText(row.sourceText) }),
 
       ...(row.locationPrecision == null
         ? {}
@@ -1227,7 +1316,12 @@ export class RoadEventsService
 
       ...(row.locationLabel == null
         ? {}
-        : { locationLabel: row.locationLabel }),
+        : {
+            locationLabel:
+              row.source === 'TELEGRAM'
+                ? sanitizeTelegramSourceText(row.locationLabel)
+                : row.locationLabel,
+          }),
 
       confirmationCount: Number(row.confirmationCount),
 
@@ -1239,7 +1333,9 @@ export class RoadEventsService
           }
         : {}),
 
-      confidence: Number(row.confidence),
+      confidence,
+
+      confidencePercent: confidencePercent(confidence),
 
       createdAt: new Date(row.createdAt).toISOString(),
 

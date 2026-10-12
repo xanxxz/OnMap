@@ -24,6 +24,7 @@ enum RoadEventStatus {
   ACTIVE
   UNCONFIRMED
   STALE
+  HIDDEN_PENDING_REVIEW
   RESOLVED
 }
 
@@ -44,6 +45,269 @@ enum RoadEventLocationPrecision {
 enum RoadEventFeedbackAction {
   CONFIRM
   REJECT
+}
+
+enum PartnerPlacementStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum PartnerContactType {
+  PHONE
+  EMAIL
+  WEBSITE
+  TELEGRAM
+  OTHER
+}
+
+enum PartnerStatAction {
+  POINT_OPEN
+  CONTACT_CLICK
+  BANNER_IMPRESSION
+  BANNER_CLICK
+}
+
+enum PushPlatform {
+  IOS
+  ANDROID
+}
+
+enum PushProviderKind {
+  APNS
+  FCM
+}
+
+enum PushOutboxKind {
+  ROAD_EVENT
+  PARTNER_POINT
+}
+
+enum PushOutboxStatus {
+  PENDING
+  SENDING
+  RETRY
+  SENT
+  CANCELLED
+}
+
+enum PartnerPushCampaignStatus {
+  AWAITING_CONFIRMATION
+  QUEUED
+  CANCELLED
+}
+
+// Tokens are server-only delivery credentials. Neither token nor identity key is public.
+model PushDevice {
+  id String @id @default(uuid()) @db.Uuid
+  identityKey String @map("identity_key") @db.Char(64)
+  installationId String @map("installation_id") @db.Uuid
+  cityId String @map("city_id") @db.VarChar(64)
+  platform PushPlatform
+  provider PushProviderKind
+  token String @db.VarChar(512)
+  tokenHash String @unique @map("token_hash") @db.Char(64)
+  enabled Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deliveries PushOutbox[]
+
+  @@unique([identityKey, installationId], map: "push_device_identity_installation_key")
+  @@index([cityId, enabled], map: "push_device_city_enabled_idx")
+  @@map("push_devices")
+}
+
+model PushOutbox {
+  id String @id @default(uuid()) @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+  dedupeKey String @map("dedupe_key") @db.VarChar(120)
+  kind PushOutboxKind
+  targetId String @map("target_id") @db.Uuid
+  cityId String @map("city_id") @db.VarChar(64)
+  status PushOutboxStatus @default(PENDING)
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  leaseUntil DateTime? @map("lease_until") @db.Timestamptz(3)
+  lastErrorCode String? @map("last_error_code") @db.VarChar(40)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  device PushDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, dedupeKey], map: "push_outbox_device_dedupe_key")
+  @@index([status, nextAttemptAt], map: "push_outbox_due_idx")
+  @@map("push_outbox")
+}
+
+model PartnerPushCampaign {
+  id String @id @default(uuid()) @db.Uuid
+  partnerPointId String @map("partner_point_id") @db.Uuid
+  status PartnerPushCampaignStatus @default(AWAITING_CONFIRMATION)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(3)
+
+  @@index([partnerPointId, approvedAt], map: "partner_push_campaign_point_idx")
+  @@map("partner_push_campaigns")
+}
+
+// Daily counters contain no actor, coordinates, contact values, or identity tokens.
+model PartnerStatDaily {
+  id String @id @default(uuid()) @db.Uuid
+  partnerPointId String @map("partner_point_id") @db.Uuid
+  action PartnerStatAction
+  detailId String @default("") @map("detail_id") @db.VarChar(36)
+  day DateTime @db.Date
+  count Int @default(0)
+
+  @@unique([partnerPointId, action, detailId, day], map: "partner_stat_daily_unique")
+  @@index([partnerPointId, day], map: "partner_stat_daily_point_day_idx")
+  @@map("partner_stat_daily")
+}
+
+// Short-lived, keyed pseudonyms only prevent repeated actions in a time window.
+model PartnerStatWindow {
+  id String @id @default(uuid()) @db.Uuid
+  partnerPointId String @map("partner_point_id") @db.Uuid
+  action PartnerStatAction
+  detailId String @default("") @map("detail_id") @db.VarChar(36)
+  actorHash String @map("actor_hash") @db.VarChar(64)
+  lastAcceptedAt DateTime @map("last_accepted_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@unique([partnerPointId, action, detailId, actorHash], map: "partner_stat_window_unique")
+  @@index([expiresAt], map: "partner_stat_window_expiry_idx")
+  @@map("partner_stat_windows")
+}
+
+model PartnerPoint {
+  id String @id @default(uuid()) @db.Uuid
+
+  cityId String @map("city_id") @db.VarChar(64)
+
+  title String @db.VarChar(160)
+
+  category String @db.VarChar(64)
+
+  backgroundColor String @default("#153D32") @map("background_color") @db.VarChar(7)
+
+  textColor String @default("#FDFBF4") @map("text_color") @db.VarChar(7)
+
+  description String? @db.VarChar(1000)
+
+  longitude Float?
+
+  latitude Float?
+
+  displayAddress String? @map("display_address") @db.VarChar(240)
+
+  // An opaque identifier for a future managed media store, never a filesystem path or URL.
+  imageAssetKey String? @map("image_asset_key") @db.VarChar(240)
+
+  promoCode String? @map("promo_code") @db.VarChar(32)
+
+  agreedPriceKopecks BigInt? @map("agreed_price_kopecks")
+
+  paidAt DateTime? @map("paid_at") @db.Timestamptz(3)
+
+  startsAt DateTime @map("starts_at") @db.Timestamptz(3)
+
+  endsAt DateTime @map("ends_at") @db.Timestamptz(3)
+
+  status PartnerPlacementStatus @default(DRAFT)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contacts PartnerPointContact[]
+
+  banners PartnerCityBanner[]
+
+  @@index([cityId, status, startsAt, endsAt], map: "partner_points_visibility_idx")
+  @@index([cityId, longitude, latitude], map: "partner_points_viewport_idx")
+  @@map("partner_points")
+}
+
+// Small normalized PNG marker assets live in PostgreSQL, not in the read-only container.
+model PartnerImageAsset {
+  key String @id @db.Uuid
+  pngBytes Bytes @map("png_bytes") @db.ByteA
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("partner_image_assets")
+}
+
+model PartnerPointContact {
+  id String @id @default(uuid()) @db.Uuid
+
+  partnerPointId String @map("partner_point_id") @db.Uuid
+
+  type PartnerContactType
+
+  label String @db.VarChar(80)
+
+  value String @db.VarChar(500)
+
+  displayOrder Int @default(0) @map("display_order")
+
+  partnerPoint PartnerPoint @relation(fields: [partnerPointId], references: [id], onDelete: Cascade)
+
+  @@index([partnerPointId, displayOrder, id], map: "partner_point_contacts_order_idx")
+  @@map("partner_point_contacts")
+}
+
+model PartnerCityBanner {
+  id String @id @default(uuid()) @db.Uuid
+
+  cityId String @unique @map("city_id") @db.VarChar(64)
+
+  title String? @db.VarChar(160)
+
+  partnerPointId String? @map("partner_point_id") @db.Uuid
+
+  partnerPoint PartnerPoint? @relation(fields: [partnerPointId], references: [id], onDelete: SetNull)
+
+  text String? @db.VarChar(300)
+
+  buttonLabel String? @map("button_label") @db.VarChar(80)
+
+  buttonUrl String? @map("button_url") @db.VarChar(2048)
+
+  startsAt DateTime? @map("starts_at") @db.Timestamptz(3)
+
+  endsAt DateTime? @map("ends_at") @db.Timestamptz(3)
+
+  enabled Boolean @default(false)
+
+  agreedPriceKopecks BigInt? @map("agreed_price_kopecks")
+
+  paidAt DateTime? @map("paid_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([cityId, enabled, startsAt, endsAt], map: "partner_city_banners_visibility_idx")
+  @@index([partnerPointId], map: "partner_city_banners_partner_point_id_idx")
+  @@map("partner_city_banners")
+}
+
+model PartnerBotDraft {
+  ownerTelegramId String @id @map("owner_telegram_id") @db.VarChar(64)
+
+  kind String @db.VarChar(16)
+
+  step String @db.VarChar(32)
+
+  payload Json
+
+  revision Int @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("partner_bot_drafts")
 }
 
 model RoadEvent {
@@ -91,7 +355,13 @@ model RoadEvent {
 
   resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(3)
 
+  statusBeforeModeration RoadEventStatus? @map("status_before_moderation")
+
+  hiddenAt DateTime? @map("hidden_at") @db.Timestamptz(3)
+
   feedbacks RoadEventFeedback[]
+
+  reports RoadEventReport[]
 
   telegramMessages TelegramRoadEventMessage[]
 
@@ -164,4 +434,126 @@ model RoadEventFeedback {
   @@index([installationId], map: "road_event_feedback_installation_idx")
   @@index([createdAt], map: "road_event_feedback_created_at_idx")
   @@map("road_event_feedback")
+}
+
+model RoadEventReport {
+  id String @id @default(uuid()) @db.Uuid
+
+  roadEventId String @map("road_event_id") @db.Uuid
+
+  reporterActorId String @map("reporter_actor_id") @db.VarChar(128)
+
+  reason String @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roadEvent RoadEvent @relation(fields: [roadEventId], references: [id], onDelete: Cascade)
+
+  @@unique([roadEventId, reporterActorId], map: "road_event_reports_event_actor_key")
+  @@index([reporterActorId, createdAt], map: "road_event_reports_actor_created_idx")
+  @@map("road_event_reports")
+}
+
+model RoadEventModerationCase {
+  id String @id @default(uuid()) @db.Uuid
+
+  roadEventId String @unique @map("road_event_id") @db.Uuid
+
+  state String @default("PENDING_REVIEW") @db.VarChar(32)
+
+  decisionAt DateTime? @map("decision_at") @db.Timestamptz(3)
+
+  moderatorTelegramId String? @map("moderator_telegram_id") @db.VarChar(64)
+
+  restrictionHours Int? @map("restriction_hours")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("road_event_moderation_cases")
+}
+
+model ActorRestriction {
+  actorId String @id @map("actor_id") @db.VarChar(128)
+
+  blockedUntil DateTime @map("blocked_until") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  createdByModeratorId String @map("created_by_moderator_id") @db.VarChar(64)
+
+  reason String @default("REPORT_REVIEW") @db.VarChar(32)
+
+  @@index([blockedUntil], map: "actor_restrictions_blocked_until_idx")
+  @@map("actor_restrictions")
+}
+
+model RoadEventAuthorNotice {
+  id String @id @default(uuid()) @db.Uuid
+
+  roadEventId String @map("road_event_id") @db.Uuid
+
+  actorId String @map("actor_id") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(3)
+
+  @@unique([roadEventId, actorId], map: "road_event_author_notices_event_actor_key")
+  @@index([actorId, acknowledgedAt, createdAt], map: "road_event_author_notices_actor_idx")
+  @@map("road_event_author_notices")
+}
+
+model TelegramModerationOutbox {
+  id String @id @default(uuid()) @db.Uuid
+
+  roadEventId String @map("road_event_id") @db.Uuid
+
+  status String @default("PENDING") @db.VarChar(16)
+
+  attempts Int @default(0)
+
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+
+  claimedAt DateTime? @map("claimed_at") @db.Timestamptz(3)
+
+  sentAt DateTime? @map("sent_at") @db.Timestamptz(3)
+
+  telegramMessageId String? @map("telegram_message_id") @db.VarChar(64)
+
+  lastErrorCode String? @map("last_error_code") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([roadEventId], map: "telegram_moderation_outbox_event_key")
+  @@index([status, nextAttemptAt], map: "telegram_moderation_outbox_pending_idx")
+  @@map("telegram_moderation_outbox")
+}
+
+model TelegramModerationUpdate {
+  updateId BigInt @id @map("update_id")
+
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@map("telegram_moderation_updates")
+}
+
+model RoadEventModerationAudit {
+  id String @id @default(uuid()) @db.Uuid
+
+  roadEventId String @map("road_event_id") @db.Uuid
+
+  moderatorTelegramId String @map("moderator_telegram_id") @db.VarChar(64)
+
+  decision String @db.VarChar(32)
+
+  restrictionHours Int? @map("restriction_hours")
+
+  telegramUpdateId BigInt? @unique @map("telegram_update_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([roadEventId, createdAt], map: "road_event_moderation_audit_event_idx")
+  @@map("road_event_moderation_audit")
 }

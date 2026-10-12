@@ -235,6 +235,10 @@ const setup = (options: SetupOptions = {}) => {
       recordUnlocated,
       clear: clearDpsObservation,
     } as unknown as DpsActivityTracker,
+    {
+      tryAcquire: jest.fn().mockResolvedValue(true),
+      release: jest.fn().mockResolvedValue(undefined),
+    } as never,
   );
 
   return {

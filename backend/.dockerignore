@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.git
+.env
+.env.*
+deploy/vps/.env
+deploy/vps/backend.env
+deploy/vps/backups
+runtime-data
+runtime-logs
+**/*.log
+npm-debug.log

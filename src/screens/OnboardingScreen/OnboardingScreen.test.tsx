@@ -60,14 +60,14 @@ describe('OnboardingScreen', () => {
     ).toBe(false);
   });
 
-  it('cannot finish before all five screens were viewed', async () => {
+  it('cannot finish before all six screens were viewed', async () => {
     const onComplete = jest.fn().mockResolvedValue(undefined);
 
     act(() => {
       renderer = create(<OnboardingScreen onComplete={onComplete} />);
     });
 
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       act(() => {
         jest.advanceTimersByTime(motion.onboardingMinimumVisibleMs);
       });

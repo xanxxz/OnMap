@@ -21,6 +21,25 @@ let refreshTokenPromise:
   | Promise<string>
   | null = null;
 
+let beforeIdentityReset: ((token: string) => Promise<void>) | null = null;
+const refreshListeners = new Set<() => void>();
+
+export const subscribeAnonymousIdentityRefresh = (listener: () => void): (() => void) => {
+  refreshListeners.add(listener);
+  return () => refreshListeners.delete(listener);
+};
+
+export const setBeforeAnonymousIdentityReset = (
+  handler: ((token: string) => Promise<void>) | null,
+): void => { beforeIdentityReset = handler; };
+
+const notifyBeforeReset = async () => {
+  const previous = await storage.getItem(ANONYMOUS_TOKEN_KEY);
+  if (previous && beforeIdentityReset) {
+    await beforeIdentityReset(previous).catch(() => undefined);
+  }
+};
+
 const createAndStoreToken =
   async (
     issueToken:
@@ -110,13 +129,16 @@ export const refreshAnonymousIdentityToken =
 
     const refreshPromise =
       (async () => {
+        await notifyBeforeReset();
         await storage.removeItem(
           ANONYMOUS_TOKEN_KEY,
         );
 
-        return createAndStoreToken(
+        const token = await createAndStoreToken(
           issueToken,
         );
+        refreshListeners.forEach(listener => listener());
+        return token;
       })();
 
     const guardedRefreshPromise =
@@ -150,6 +172,7 @@ export const refreshAnonymousIdentityToken =
 
 export const clearAnonymousIdentityToken =
   async (): Promise<void> => {
+    await notifyBeforeReset();
     anonymousTokenPromise =
       null;
 

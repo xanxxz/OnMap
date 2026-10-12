@@ -58,8 +58,6 @@ interface ReportEventSheetProps {
 
   locationStatus: ReportLocationStatus;
 
-  locationAccuracy: number | null;
-
   locationValid: boolean;
 
   isSubmitting: boolean;
@@ -119,7 +117,6 @@ const EVENT_TYPES: RoadEventType[] =
     'ROAD_HAZARD',
     'TRAFFIC_LIGHT',
     'ROAD_SERVICE',
-    'ROAD_PATROL',
     'OTHER',
   ];
 
@@ -145,7 +142,6 @@ export const ReportEventSheet = ({
   coordinate,
   locationSource,
   locationStatus,
-  locationAccuracy,
   locationValid,
   isSubmitting,
   submissionError = null,
@@ -195,6 +191,17 @@ export const ReportEventSheet = ({
             Выберите тип события
           </Text>
 
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={ROAD_EVENT_META.ROAD_PATROL.label}
+            onPress={() => onSelect('ROAD_PATROL')}
+            style={({pressed}) => [styles.patrolItem, pressed && styles.itemPressed]}>
+            <View style={styles.patrolIcon}><RoadEventIcon type="ROAD_PATROL" compact={false} /></View>
+            <View>
+              <Text style={styles.patrolLabel}>ДПС</Text>
+              <Text style={styles.patrolDescription}>Сообщить о посте на дороге</Text>
+            </View>
+          </Pressable>
           <View style={styles.grid}>
             {EVENT_TYPES.map(type => {
               const meta =
@@ -220,6 +227,7 @@ export const ReportEventSheet = ({
                   ]}>
                   <RoadEventIcon
                     type={type}
+                    compact={false}
                   />
 
                   <Text
@@ -363,12 +371,7 @@ export const ReportEventSheet = ({
                 </Text>
               ) : locationStatus === 'APPROXIMATE' ? (
                 <Text style={styles.locationWarning}>
-                  Точка определена приблизительно. Проверьте положение на
-                  карте
-                  {locationAccuracy
-                    ? ` · около ${Math.round(locationAccuracy)} м`
-                    : ''}
-                  .
+                  Точка определена приблизительно. Проверьте положение на карте.
                 </Text>
               ) : locationStatus === 'MANUAL' ? (
                 <Text style={styles.locationReady}>

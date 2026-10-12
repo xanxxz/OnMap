@@ -1,6 +1,12 @@
 import React from 'react';
 
-import { Text } from 'react-native';
+import {
+  Animated,
+  PanResponder,
+  ScrollView,
+  StyleSheet,
+  Text,
+} from 'react-native';
 
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
@@ -14,7 +20,25 @@ import {
   EventDetailsSheet,
   formatTomTomDelay,
   formatTomTomLength,
+  shouldCaptureEventSheetDismiss,
+  shouldDismissEventSheet,
 } from './EventDetailsSheet';
+import { styles as sheetStyles } from './EventDetailsSheet.styles';
+
+jest.mock('@sbaiahmed1/react-native-blur', () => ({
+  BlurView: require('react-native').View,
+}));
+
+jest.mock('../../features/road-event-feedback/model/useRoadEventReport', () => ({
+  useRoadEventReport: () => ({
+    mutate: jest.fn(),
+    reset: jest.fn(),
+    isPending: false,
+    isSuccess: false,
+    isError: false,
+    data: undefined,
+  }),
+}));
 
 jest.mock('react-native-reanimated', () => {
   const ReactNative = require('react-native');
@@ -25,9 +49,10 @@ jest.mock('react-native-reanimated', () => {
 
   return {
     __esModule: true,
-    default: {View: ReactNative.View},
-    ReduceMotion: {System: 'system'},
+    default: { View: ReactNative.View },
+    ReduceMotion: { System: 'system' },
     useSharedValue: shared,
+    useReducedMotion: () => false,
     useAnimatedStyle: (factory: () => unknown) => factory(),
     withSpring: (value: number) => value,
   };
@@ -104,6 +129,187 @@ describe('EventDetails feedback pending guard', () => {
     }
   });
 
+  it('extends the selected-event sheet to screen edges and keeps content above the safe area', () => {
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={event}
+          bottomInset={34}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    expect(
+      renderer.root.findByProps({ testID: 'user-event-details' }),
+    ).toBeDefined();
+    const style = StyleSheet.flatten(sheetStyles.container);
+
+    expect(style.left).toBe(0);
+    expect(style.right).toBe(0);
+    expect(style.bottom).toBe(0);
+    expect(style.borderTopLeftRadius).toBeGreaterThan(0);
+    expect(style.borderTopRightRadius).toBeGreaterThan(0);
+    expect(style.paddingBottom).toBe(20);
+  });
+
+  it('closes on the backdrop, but not when pressing an action inside the sheet', () => {
+    const onClose = jest.fn();
+    const onFeedback = jest.fn();
+    const timing = jest.spyOn(Animated, 'timing').mockReturnValue({
+      start: callback => callback?.({ finished: true }),
+    } as Animated.CompositeAnimation);
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={event}
+          isSubmitting={false}
+          onFeedback={onFeedback}
+          onClose={onClose}
+        />,
+      );
+    });
+
+    act(() => {
+      renderer.root
+        .findByProps({
+          accessibilityLabel: 'Подтвердить актуальность события',
+        })
+        .props.onPress();
+    });
+    expect(onFeedback).toHaveBeenCalledWith('CONFIRM');
+    expect(onClose).not.toHaveBeenCalled();
+
+    act(() => {
+      renderer.root
+        .findByProps({ testID: 'event-details-backdrop' })
+        .props.onPress();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(timing).toHaveBeenCalledTimes(1);
+    timing.mockRestore();
+  });
+
+  it('uses the same exit animation for the close button', () => {
+    const onClose = jest.fn();
+    let complete: ((result: { finished: boolean }) => void) | undefined;
+    const timing = jest.spyOn(Animated, 'timing').mockReturnValue({
+      start: callback => {
+        complete = callback;
+      },
+    } as Animated.CompositeAnimation);
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={event}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={onClose}
+        />,
+      );
+    });
+    act(() =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Закрыть' })
+        .props.onPress(),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    expect(timing).toHaveBeenCalledTimes(1);
+    act(() => complete?.({ finished: true }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    timing.mockRestore();
+  });
+
+  it('renders the server percentage instead of deriving one from legacy confidence', () => {
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={{ ...event, confidence: 0.67, confidencePercent: 40 }}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    const texts = renderer.root
+      .findAllByType(Text)
+      .map(node => node.props.children);
+    expect(texts).toContain('40%');
+    expect(texts).not.toContain('67%');
+  });
+
+  it('only captures a downward dismiss gesture when scrolled to the top', () => {
+    expect(shouldCaptureEventSheetDismiss(0, 15, 0)).toBe(true);
+    expect(shouldCaptureEventSheetDismiss(20, 50, 0)).toBe(false);
+    expect(shouldCaptureEventSheetDismiss(0, -50, 0)).toBe(false);
+    expect(shouldCaptureEventSheetDismiss(0, 15, 30)).toBe(false);
+    expect(shouldDismissEventSheet(50, 0.2)).toBe(false);
+    expect(shouldDismissEventSheet(110, 0.2)).toBe(true);
+    expect(shouldDismissEventSheet(65, 1.3)).toBe(true);
+  });
+
+  it('animates a sufficient downward swipe before closing the selected event', () => {
+    const onClose = jest.fn();
+    let handlers: Parameters<typeof PanResponder.create>[0] | null = null;
+    const createPan = jest
+      .spyOn(PanResponder, 'create')
+      .mockImplementation(config => {
+        handlers = config;
+        return { panHandlers: {} } as ReturnType<typeof PanResponder.create>;
+      });
+    const timing = jest.spyOn(Animated, 'timing').mockReturnValue({
+      start: callback => callback?.({ finished: true }),
+    } as Animated.CompositeAnimation);
+
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={event}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={onClose}
+        />,
+      );
+    });
+
+    expect(handlers).not.toBeNull();
+    const activeHandlers = handlers as unknown as Parameters<
+      typeof PanResponder.create
+    >[0];
+    expect(
+      activeHandlers.onMoveShouldSetPanResponderCapture?.(
+        {} as never,
+        { dy: 15, dx: 0 } as never,
+      ),
+    ).toBe(true);
+    const scroll = renderer.root.findByType(ScrollView);
+    act(() => {
+      scroll.props.onScroll({ nativeEvent: { contentOffset: { y: 42 } } });
+    });
+    expect(
+      activeHandlers.onMoveShouldSetPanResponderCapture?.(
+        {} as never,
+        { dy: 120, dx: 0 } as never,
+      ),
+    ).toBe(false);
+    act(() => {
+      scroll.props.onScroll({ nativeEvent: { contentOffset: { y: 0 } } });
+    });
+    act(() => {
+      activeHandlers.onPanResponderRelease?.(
+        {} as never,
+        { dy: 110, vy: 0.2 } as never,
+      );
+    });
+    expect(timing).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    timing.mockRestore();
+    createPan.mockRestore();
+  });
+
   it('disables both feedback actions while one request is pending', () => {
     act(() => {
       renderer = create(
@@ -145,6 +351,26 @@ describe('EventDetails feedback pending guard', () => {
         accessibilityLabel: 'Подтвердить актуальность события',
       }),
     ).toBeDefined();
+    expect(renderer.root.findByProps({
+      accessibilityLabel: 'Пожаловаться на событие',
+    })).toBeDefined();
+  });
+
+  it('does not offer a report action for a resolved event', () => {
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={{...event, status: 'RESOLVED'}}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    expect(renderer.root.findAllByProps({
+      accessibilityLabel: 'Пожаловаться на событие',
+    })).toHaveLength(0);
   });
 
   it('opens TOMTOM details without any voting controls', () => {
@@ -237,13 +463,8 @@ describe('EventDetails feedback pending guard', () => {
       locationPrecision: 'STREET',
       locationLabel: 'Улица Комарова',
       sourceText: 'Комарова притерлись',
-      geometry: {
-        type: 'LineString',
-        coordinates: [
-          [47.79, 52.01],
-          [47.8, 52.02],
-        ],
-      },
+      coordinate: [47.81, 52.01],
+      geometry: {type: 'Point', coordinates: [47.81, 52.01]},
     };
 
     act(() => {
@@ -264,12 +485,36 @@ describe('EventDetails feedback pending guard', () => {
     expect(text).toEqual(
       expect.arrayContaining([
         'Улица Комарова',
-        'Примерно на этой улице',
+        'Примерное место',
         'Точное место не указано',
         'Исходное сообщение',
         'Комарова притерлись',
       ]),
     );
+  });
+
+  it('shows useful Telegram context with server-redacted contact data', () => {
+    const safeEvent: TelegramRoadEvent = {
+      ...telegramEvent,
+      sourceText: 'ДПС на Комарова, звоните [телефон скрыт]',
+    };
+
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={safeEvent}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+
+    expect(
+      renderer.root
+        .findAllByType(Text)
+        .some(node => node.props.children === safeEvent.sourceText),
+    ).toBe(true);
   });
 
   it('does not render USER feedback or confidence for TELEGRAM', () => {

@@ -10,14 +10,25 @@ import { RoadEventsService } from './road-events.service';
 
 import { RoadEventsGateway } from './realtime/road-events.gateway';
 import { DpsActivityTracker } from './dps-activity-tracker.service';
+import { RoadEventReportsService } from './road-event-reports.service';
 
 @Module({
   imports: [IdentityModule, TomTomModule],
 
   controllers: [RoadEventsController],
 
-  providers: [RoadEventsService, RoadEventsGateway, DpsActivityTracker],
+  providers: [
+    RoadEventsService,
+    RoadEventsGateway,
+    DpsActivityTracker,
+    RoadEventReportsService,
+  ],
 
-  exports: [RoadEventsService, RoadEventsGateway, DpsActivityTracker],
+  exports: [
+    RoadEventsService,
+    RoadEventsGateway,
+    DpsActivityTracker,
+    RoadEventReportsService,
+  ],
 })
 export class RoadEventsModule {}

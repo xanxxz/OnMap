@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Modal, Pressable, Text, View } from 'react-native';
+import { AppState, Linking, Modal, Pressable, Text, View } from 'react-native';
 
 import type { DpsActivitySummary } from '../../entities/road-event/api/roadEventRepository';
+import type { PartnerBanner } from '../../entities/partner-placement/model/partnerPlacement';
+import { getPartnerAppearance } from '../../entities/partner-placement/lib/partnerAppearance';
 import type { CityConfig } from '../../shared/config/cities';
 import type { RealtimeStatus } from '../../entities/road-event/model/useRoadEventRealtime';
 import { BottomSheet } from '../../shared/ui/BottomSheet/BottomSheet';
+import { SUPPORT_HANDLE, SUPPORT_URL } from '../../shared/config/support';
 
 import { headerStyles } from './MapHeader.styles';
 
@@ -16,6 +19,10 @@ interface MapHeaderProps {
   dpsActivityLoading?: boolean;
   eventCount: number;
   realtimeStatus: RealtimeStatus;
+  partnerBanner?: PartnerBanner | null;
+  partnerBannerVisible?: boolean;
+  onPartnerBannerImpression?: (bannerId: string) => void;
+  onPartnerBannerPress?: (bannerId: string) => void;
   onSelectCity: (cityId: string) => void;
 }
 
@@ -39,13 +46,44 @@ export const MapHeader = ({
   dpsActivityLoading = false,
   eventCount,
   realtimeStatus,
+  partnerBanner,
+  partnerBannerVisible = true,
+  onPartnerBannerImpression,
+  onPartnerBannerPress,
   onSelectCity,
 }: MapHeaderProps) => {
   const [selectorVisible, setSelectorVisible] = useState(false);
+  const [selectorMounted, setSelectorMounted] = useState(false);
+  const [supportOpenFailed, setSupportOpenFailed] = useState(false);
+  const [bannerOpenFailed, setBannerOpenFailed] = useState(false);
+  const [bannerLaidOut, setBannerLaidOut] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const countedBanners = useRef(new Set<string>());
+  const impressionCallback = useRef(onPartnerBannerImpression);
+  impressionCallback.current = onPartnerBannerImpression;
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => setAppActive(state === 'active'));
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    setBannerLaidOut(false);
+  }, [partnerBanner?.id]);
+  useEffect(() => {
+    const id = partnerBanner?.id;
+    if (!id || !bannerLaidOut || !partnerBannerVisible || !appActive || selectorMounted || countedBanners.current.has(id)) return;
+    const timer = setTimeout(() => {
+      countedBanners.current.add(id);
+      impressionCallback.current?.(id);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [partnerBanner?.id, bannerLaidOut, partnerBannerVisible, appActive, selectorMounted]);
+  const closeSelector = useCallback(() => setSelectorVisible(false), []);
+  const selectorClosed = useCallback(() => setSelectorMounted(false), []);
   const status = useMemo(
     () => formatEventStatus(eventCount, realtimeStatus),
     [eventCount, realtimeStatus],
   );
+  const bannerAppearance = getPartnerAppearance(partnerBanner?.appearance);
 
   return (
     <>
@@ -54,7 +92,10 @@ export const MapHeader = ({
           accessibilityRole="button"
           accessibilityLabel={`Выбрать город. Сейчас ${city.name}`}
           testID="city-header-button"
-          onPress={() => setSelectorVisible(true)}
+          onPress={() => {
+            setSelectorMounted(true);
+            setSelectorVisible(true);
+          }}
           style={({ pressed }) => [
             headerStyles.cityCard,
             pressed && headerStyles.cardPressed,
@@ -65,7 +106,14 @@ export const MapHeader = ({
             <Text numberOfLines={1} style={headerStyles.cityTitle}>
               {city.name}
             </Text>
-            <Text style={headerStyles.chevron}>⌄</Text>
+            <View
+              accessible={false}
+              pointerEvents="none"
+              testID="city-header-chevron"
+              style={headerStyles.chevron}
+            >
+              <View style={headerStyles.chevronShape} />
+            </View>
           </View>
 
           <View style={headerStyles.statusRow}>
@@ -99,17 +147,51 @@ export const MapHeader = ({
         </View>
       </View>
 
+      {partnerBanner ? (
+        <View testID="partner-banner" onLayout={event => setBannerLaidOut(event.nativeEvent.layout.width > 0 && event.nativeEvent.layout.height > 0)} style={[headerStyles.partnerBanner, {backgroundColor: bannerAppearance.backgroundColor}]}>
+          <Text numberOfLines={2} style={[headerStyles.partnerBannerTitle, {color: bannerAppearance.textColor}]}>{partnerBanner.title}</Text>
+          <Text numberOfLines={2} style={[headerStyles.partnerBannerDescription, {color: bannerAppearance.textColor}]}>{partnerBanner.text}</Text>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel={partnerBanner.button.label}
+            onPress={() => {
+              onPartnerBannerPress?.(partnerBanner.id);
+              Linking.openURL(partnerBanner.button.url).catch(() =>
+                setBannerOpenFailed(true),
+              );
+            }}
+            style={({ pressed }) => [
+              headerStyles.partnerBannerButton,
+              pressed && headerStyles.partnerBannerButtonPressed,
+            ]}
+          >
+            <Text numberOfLines={1} style={[headerStyles.partnerBannerButtonText, {color: bannerAppearance.textColor}]}>
+              {partnerBanner.button.label}
+            </Text>
+            <View style={[headerStyles.partnerBannerArrow, {borderColor: bannerAppearance.textColor}]} accessible={false}>
+              <View style={[headerStyles.partnerBannerArrowHead, {borderColor: bannerAppearance.textColor}]} />
+            </View>
+          </Pressable>
+        </View>
+      ) : null}
+      {partnerBanner && bannerOpenFailed ? (
+        <Text selectable style={headerStyles.bannerError}>
+          Не удалось открыть ссылку. Адрес: {partnerBanner.button.url}
+        </Text>
+      ) : null}
+
       <Modal
         transparent
         statusBarTranslucent
-        visible={selectorVisible}
+        visible={selectorMounted}
         animationType="none"
-        onRequestClose={() => setSelectorVisible(false)}
+        onRequestClose={closeSelector}
       >
         <BottomSheet
           visible={selectorVisible}
           offset={360}
-          onClose={() => setSelectorVisible(false)}
+          onClose={closeSelector}
+          onClosed={selectorClosed}
         >
           <View style={headerStyles.selectorContent}>
             <Text style={headerStyles.selectorTitle}>Выберите город</Text>
@@ -128,7 +210,7 @@ export const MapHeader = ({
                   accessibilityLabel={item.name}
                   onPress={() => {
                     onSelectCity(item.id);
-                    setSelectorVisible(false);
+                    closeSelector();
                   }}
                   style={({ pressed }) => [
                     headerStyles.cityOption,
@@ -153,6 +235,27 @@ export const MapHeader = ({
                 </Pressable>
               );
             })}
+
+            <View style={headerStyles.supportSection}>
+              <Text style={headerStyles.supportTitle}>Поддержка</Text>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel={`Открыть поддержку ${SUPPORT_HANDLE}`}
+                onPress={() => {
+                  Linking.openURL(SUPPORT_URL).catch(() =>
+                    setSupportOpenFailed(true),
+                  );
+                }}
+                style={headerStyles.supportLink}
+              >
+                <Text style={headerStyles.supportLinkText}>{SUPPORT_HANDLE}</Text>
+              </Pressable>
+              {supportOpenFailed ? (
+                <Text selectable style={headerStyles.supportHint}>
+                  Не удалось открыть ссылку. Адрес можно скопировать: {SUPPORT_URL}
+                </Text>
+              ) : null}
+            </View>
           </View>
         </BottomSheet>
       </Modal>

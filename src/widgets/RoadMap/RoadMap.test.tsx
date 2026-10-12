@@ -49,6 +49,12 @@ jest.mock('@maplibre/maplibre-react-native', () => {
     Layer: (props: Record<string, unknown>) => (
       <ReactNative.View {...props} testID="coverage-boundary-line" />
     ),
+    LayerAnnotation: (props: Record<string, unknown> & {children?: React.ReactNode}) => (
+      <ReactNative.View {...props} testID="layer-annotation" />
+    ),
+    Marker: ({children, ...props}: Record<string, unknown> & {children?: React.ReactNode}) => (
+      <ReactNative.View {...props} testID="native-marker">{children}</ReactNative.View>
+    ),
 
     Map: ReactModule.forwardRef(
       (
@@ -56,8 +62,6 @@ jest.mock('@maplibre/maplibre-react-native', () => {
         ref: React.Ref<typeof ReactNative.View>,
       ) => <ReactNative.View {...props} ref={ref} />,
     ),
-
-    UserLocation: () => null,
 
     GeoJSONSource: ({
       children,
@@ -93,7 +97,15 @@ jest.mock(
 describe('RoadMap provider lifecycle', () => {
   let renderer: ReactTestRenderer;
 
-  const renderMap = (events: RoadEvent[] = [], city = ACTIVE_CITY) => {
+  const renderMap = (
+    events: RoadEvent[] = [],
+    city = ACTIVE_CITY,
+    liveUserLocation: {
+      coordinate: [number, number];
+      accuracy: number | null;
+      stale: boolean;
+    } | null = null,
+  ) => {
     act(() => {
       renderer = create(
         <SafeAreaProvider
@@ -116,7 +128,7 @@ describe('RoadMap provider lifecycle', () => {
             city={city}
             events={events}
             draftCoordinate={null}
-            locationPermission="denied"
+            liveUserLocation={liveUserLocation}
             onEventPress={jest.fn()}
             onLongPressCoordinate={jest.fn()}
             onViewportChange={jest.fn()}
@@ -171,7 +183,7 @@ describe('RoadMap provider lifecycle', () => {
     ).toHaveLength(0);
   });
 
-  it('renders only the display contour while keeping technical camera bounds', () => {
+  it('keeps the real city contour distinct from the visible working-area edge', () => {
     renderMap();
 
     const source = renderer.root.findByProps({
@@ -180,9 +192,13 @@ describe('RoadMap provider lifecycle', () => {
 
     expect(source.props.data).toBe(ACTIVE_CITY.displayBoundary);
     expect(source.props.data).not.toBe(ACTIVE_CITY.coverageBoundary);
-    expect(
-      renderer.root.findByProps({ testID: 'road-map-camera' }).props.maxBounds,
-    ).toEqual([47.5, 51.82, 48.2, 52.25]);
+    const cameraBounds = renderer.root.findByProps({ testID: 'road-map-camera' }).props.maxBounds;
+    expect(cameraBounds[0]).toBeLessThan(ACTIVE_CITY.coverageBounds.west);
+    expect(cameraBounds[1]).toBeLessThan(ACTIVE_CITY.coverageBounds.south);
+    expect(cameraBounds[2]).toBeGreaterThan(ACTIVE_CITY.coverageBounds.east);
+    expect(cameraBounds[3]).toBeGreaterThan(ACTIVE_CITY.coverageBounds.north);
+    expect(renderer.root.findByProps({id: 'working-area-edge-source'}).props.data)
+      .toEqual(ACTIVE_CITY.coverageBoundary);
     expect(
       renderer.root.findByProps({ id: 'city-coverage-boundary-fill' }),
     ).toBeTruthy();
@@ -199,6 +215,23 @@ describe('RoadMap provider lifecycle', () => {
     expect(
       renderer.root.findAllByProps({ id: 'city-coverage-boundary-source' }),
     ).toHaveLength(0);
+  });
+
+  it('renders a distinct stale-aware live location marker', () => {
+    renderMap([], ACTIVE_CITY, {
+      coordinate: [47.81, 52.01],
+      accuracy: 92,
+      stale: true,
+    });
+
+    const marker = renderer.root.findByProps({id: 'onmap-live-user-location'});
+    expect(renderer.root.findByProps({testID: 'native-marker'}).props.id)
+      .toBe('onmap-live-user-location');
+    expect(marker.props.lngLat).toEqual([47.81, 52.01]);
+    expect(marker.props.offset).toEqual([0, -11]);
+    expect(renderer.root.findAllByType(Text).some(node =>
+      node.props.children === 'Последняя позиция',
+    )).toBe(true);
   });
 
   it('shows a map-specific error after both providers fail and retries once requested', () => {
@@ -316,9 +349,12 @@ describe('RoadMap provider lifecycle', () => {
 
     expect(
       renderer.root.findByProps({
-        testID: 'coverage-boundary-source',
+        id: 'city-coverage-boundary-source',
       }).props.data,
     ).toEqual(ACTIVE_CITY.displayBoundary);
+    expect(renderer.root.findByProps({id: 'working-area-edge-source'}).props.data)
+      .toEqual(ACTIVE_CITY.coverageBoundary);
+    expect(nativeMap().props.compass).toBe(false);
     expect(
       renderer.root.findByProps({
         testID: 'road-map-camera',
@@ -327,6 +363,36 @@ describe('RoadMap provider lifecycle', () => {
       center: ACTIVE_CITY.center,
       zoom: ACTIVE_CITY.defaultZoom,
     });
+  });
+
+  it('commits a placement point only after a user-driven camera move', () => {
+    const onPlacementCenterChange = jest.fn();
+    act(() => {
+      renderer = create(
+        <SafeAreaProvider initialMetrics={{
+          frame: {x: 0, y: 0, width: 390, height: 844},
+          insets: {top: 47, right: 0, bottom: 34, left: 0},
+        }}>
+          <RoadMap
+            city={ACTIVE_CITY}
+            events={[]}
+            draftCoordinate={[47.8, 52.02]}
+            placementType="ACCIDENT"
+            liveUserLocation={null}
+            onEventPress={jest.fn()}
+            onLongPressCoordinate={jest.fn()}
+            onViewportChange={jest.fn()}
+            onPlacementCenterChange={onPlacementCenterChange}
+          />
+        </SafeAreaProvider>,
+      );
+    });
+    expect(renderer.root.findByProps({testID: 'report-placement-target'})).toBeTruthy();
+    const region = {center: [47.81, 52.03], bounds: [47.7, 52, 47.9, 52.1]};
+    act(() => nativeMap().props.onRegionDidChange({nativeEvent: {...region, userInteraction: false}}));
+    expect(onPlacementCenterChange).not.toHaveBeenCalled();
+    act(() => nativeMap().props.onRegionDidChange({nativeEvent: {...region, userInteraction: true}}));
+    expect(onPlacementCenterChange).toHaveBeenCalledWith([47.81, 52.03]);
   });
 
   it('renders event markers after the coverage boundary layer', () => {

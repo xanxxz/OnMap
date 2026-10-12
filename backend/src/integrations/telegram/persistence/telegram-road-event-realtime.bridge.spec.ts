@@ -98,7 +98,14 @@ const setup = (
 };
 
 describe('TelegramRoadEventRealtimeBridge', () => {
-  afterEach(() => jest.restoreAllMocks());
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-31T08:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
 
   it('emits one existing road-event:created payload after CREATED', async () => {
     const { bridge, broadcastCreatedMock } = setup();
@@ -108,6 +115,58 @@ describe('TelegramRoadEventRealtimeBridge', () => {
       roadEventId: 'event-1',
     });
     expect(broadcastCreatedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('broadcasts approximate street-point geometry and precision unchanged', async () => {
+    const { bridge, broadcastCreatedMock, queryRawMock } = setup();
+    const event = {
+      ...normalizedEvent(),
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [47.81, 52.01] as [number, number],
+      },
+      locationPrecision: 'STREET' as const,
+    };
+    queryRawMock.mockResolvedValueOnce([
+      {
+        ...committedRow,
+        longitude: 47.81,
+        latitude: 52.01,
+        geometry: event.geometry,
+        locationPrecision: 'STREET',
+      },
+    ]);
+
+    await bridge.apply(event);
+
+    expect(broadcastCreatedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        geometry: event.geometry,
+        locationPrecision: 'STREET',
+      }),
+    );
+  });
+
+  it('redacts contact details and links from Telegram realtime payloads', async () => {
+    const { bridge, broadcastCreatedMock, queryRawMock } = setup();
+    queryRawMock.mockResolvedValueOnce([
+      {
+        ...committedRow,
+        locationLabel: 'Комарова +7 (999) 123-45-67',
+        sourceText:
+          'ДПС на Комарова, звоните +7 (999) 123-45-67 @road_user https://t.me/group',
+      },
+    ]);
+
+    await bridge.apply(normalizedEvent());
+
+    expect(broadcastCreatedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceText:
+          'ДПС на Комарова, звоните [телефон скрыт] [контакт скрыт] [ссылка скрыта]',
+        locationLabel: 'Комарова [телефон скрыт]',
+      }),
+    );
   });
 
   it('emits one existing road-event:updated payload after UPDATED', async () => {
@@ -160,9 +219,21 @@ describe('TelegramRoadEventRealtimeBridge', () => {
       rejectionCount: 0,
       lastConfirmedAt: '2026-08-31T08:00:00.000Z',
       confidence: 0.9,
+      confidencePercent: 90,
       createdAt: '2026-08-31T08:00:00.000Z',
       expiresAt: '2026-08-31T10:00:00.000Z',
     });
+  });
+
+  it('broadcasts the same age-adjusted confidence as REST reads', async () => {
+    jest.setSystemTime(new Date('2026-08-31T09:30:00.000Z'));
+    const { bridge, broadcastCreatedMock } = setup();
+
+    await bridge.apply(normalizedEvent());
+
+    expect(broadcastCreatedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ confidence: 0.75 }),
+    );
   });
 
   it.each([

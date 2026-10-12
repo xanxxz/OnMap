@@ -35,6 +35,10 @@ interface ReportEventState {
     status: 'PERMISSION_DENIED' | 'UNAVAILABLE',
   ) => void;
 
+  setManualLocation: (coordinate: [number, number]) => void;
+
+  beginLocationLookup: () => void;
+
   openFromMap: (
     coordinate: [number, number],
   ) => void;
@@ -76,20 +80,52 @@ export const useReportEventStore =
       }),
 
     setCurrentLocation: (coordinate, accuracy, status) =>
-      set({
-        coordinate,
-        locationSource: 'CURRENT_LOCATION',
-        locationStatus: status,
-        locationAccuracy: accuracy,
-      }),
+      set(state =>
+        state.isOpen && state.locationSource === 'CURRENT_LOCATION'
+          ? {
+              coordinate,
+              locationSource: 'CURRENT_LOCATION',
+              locationStatus: status,
+              locationAccuracy: accuracy,
+            }
+          : state,
+      ),
 
     setLocationFailure: locationStatus =>
-      set({
-        coordinate: null,
-        locationSource: 'CURRENT_LOCATION',
-        locationStatus,
-        locationAccuracy: null,
-      }),
+      set(state =>
+        state.isOpen && state.locationSource === 'CURRENT_LOCATION'
+          ? {
+              coordinate: null,
+              locationSource: 'CURRENT_LOCATION',
+              locationStatus,
+              locationAccuracy: null,
+            }
+          : state,
+      ),
+
+    setManualLocation: coordinate =>
+      set(state =>
+        state.isOpen
+          ? {
+              coordinate,
+              locationSource: 'MAP_LONG_PRESS',
+              locationStatus: 'MANUAL',
+              locationAccuracy: null,
+            }
+          : state,
+      ),
+
+    beginLocationLookup: () =>
+      set(state =>
+        state.isOpen
+          ? {
+              coordinate: null,
+              locationSource: 'CURRENT_LOCATION',
+              locationStatus: 'LOCATING',
+              locationAccuracy: null,
+            }
+          : state,
+      ),
 
     openFromMap: coordinate =>
       set(state => ({

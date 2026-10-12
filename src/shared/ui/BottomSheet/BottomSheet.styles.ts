@@ -69,4 +69,8 @@ export const styles =
       backgroundColor:
         colors.borderStrong,
     },
+    handleTouchArea: {
+      minHeight: 28,
+      justifyContent: 'flex-start',
+    },
   });

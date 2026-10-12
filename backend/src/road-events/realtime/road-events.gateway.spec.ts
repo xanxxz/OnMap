@@ -13,6 +13,7 @@ const event: RoadEventRealtimePayload = {
   confirmationCount: 0,
   rejectionCount: 0,
   confidence: 0.9,
+  confidencePercent: 90,
   createdAt: '2026-08-31T08:00:00.000Z',
   expiresAt: '2026-08-31T10:00:00.000Z',
 };

@@ -42,6 +42,7 @@ import { TelegramRuntimeReviewLogger } from './telegram-runtime-review.logger';
 import { TelegramRuntimeContextStore } from './telegram-runtime-context.store';
 import { TelegramSourceCursorStore } from './telegram-source-cursor.store';
 import { DpsActivityTracker } from '../../../road-events/dps-activity-tracker.service';
+import { TelegramSingletonLockService } from '../telegram-singleton-lock.service';
 
 type MutableCounters = {
   -readonly [
@@ -85,6 +86,7 @@ export class TelegramIngestionRuntimeService
     private readonly reviewLogger: TelegramRuntimeReviewLogger,
     private readonly cursorStore: TelegramSourceCursorStore,
     private readonly dpsActivityTracker: DpsActivityTracker,
+    private readonly singletonLock: TelegramSingletonLockService,
   ) {}
 
   onApplicationBootstrap(): Promise<void> {
@@ -182,6 +184,29 @@ export class TelegramIngestionRuntimeService
       return;
     }
 
+    try {
+      if (
+        !(await this.singletonLock.tryAcquire('mtproto-runtime', () => {
+          this.logger.error(
+            'Telegram ingestion runtime stopping: singleton lock connection lost',
+          );
+          void this.shutdown();
+        }))
+      ) {
+        this.status = 'ERROR';
+        this.logger.warn(
+          'Telegram ingestion runtime not started: singleton lock is held by another instance',
+        );
+        return;
+      }
+    } catch {
+      this.status = 'ERROR';
+      this.logger.error(
+        'Telegram ingestion runtime not started: singleton lock unavailable',
+      );
+      return;
+    }
+
     this.status = 'STARTING';
 
     try {
@@ -235,6 +260,7 @@ export class TelegramIngestionRuntimeService
       );
       await this.source.stop().catch(() => undefined);
       await this.source.disconnect().catch(() => undefined);
+      await this.singletonLock.release('mtproto-runtime');
     }
   }
 
@@ -386,6 +412,7 @@ export class TelegramIngestionRuntimeService
     await this.source.stop().catch(() => undefined);
     await waitForInflight(this.inFlight, TELEGRAM_RUNTIME_SHUTDOWN_TIMEOUT_MS);
     await this.source.disconnect().catch(() => undefined);
+    await this.singletonLock.release('mtproto-runtime');
     this.citySources = [];
     this.cursors.clear();
     this.recoveryRequired.clear();

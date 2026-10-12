@@ -103,6 +103,19 @@ export class IdentityService {
     return payload.sub;
   }
 
+  // Domain-separated pseudonym: never persist the token or its raw subject.
+  partnerStatisticsPseudonym(identityId: string, scope: string): string {
+    return createHmac('sha256', this.signingSecret)
+      .update(`partner-statistics:v1:${identityId}:${scope}`, 'utf8')
+      .digest('hex');
+  }
+
+  pushDeviceIdentityKey(identityId: string): string {
+    return createHmac('sha256', this.signingSecret)
+      .update(`push-device:v1:${identityId}`, 'utf8')
+      .digest('hex');
+  }
+
   private sign(value: string): string {
     return createHmac('sha256', this.signingSecret)
       .update(value, 'utf8')

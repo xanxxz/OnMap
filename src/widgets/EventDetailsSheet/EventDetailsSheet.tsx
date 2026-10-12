@@ -1,12 +1,22 @@
-import React, { PropsWithChildren, useEffect, useRef } from 'react';
+import React, {
+  PropsWithChildren,
+  useCallback,
+  useEffect,
+  useRef,
+} from 'react';
 
 import {
   ActivityIndicator,
   Animated,
+  PanResponder,
   Pressable,
+  ScrollView,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
+
+import { useReducedMotion } from 'react-native-reanimated';
 
 import {
   LocationPrecision,
@@ -17,19 +27,20 @@ import {
 
 import type { RoadEventActionErrorState } from '../../entities/road-event/model/roadEventActionError';
 
-import { RoadEventFeedbackAction } from '../../entities/road-event/lib/roadEventFreshness';
+import { RoadEventFeedbackAction } from '../../entities/road-event/model/roadEvent';
 
 import { formatEventTime } from '../../entities/road-event/lib/formatEventTime';
 
 import { EventMarker } from '../../entities/road-event/ui/EventMarker/EventMarker';
 
+import { EventReportAction } from './EventReportAction';
 import { styles } from './EventDetailsSheet.styles';
 
 const LOCATION_PRECISION_LABEL: Record<LocationPrecision, string> = {
   EXACT: 'Точное место',
   INTERSECTION: 'Перекрёсток',
   LANDMARK: 'Ориентир',
-  STREET: 'Примерно на этой улице',
+  STREET: 'Примерное место',
   AREA: 'Примерно в этом районе',
   SETTLEMENT: 'Примерно в этом населённом пункте',
 };
@@ -64,6 +75,8 @@ const STATUS_LABEL = {
   UNCONFIRMED: 'Нужно подтверждение',
 
   STALE: 'Давно не подтверждали',
+
+  HIDDEN_PENDING_REVIEW: 'Временно скрыто на проверке',
 
   RESOLVED: 'Завершено',
 } as const;
@@ -108,12 +121,12 @@ const formatOptionalDateTime = (value: string | undefined): string | null => {
   return Number.isFinite(timestamp) ? formatEventTime(value) : null;
 };
 
-const EventTitle = ({event}: {event: RoadEvent}) => (
+const EventTitle = ({ event }: { event: RoadEvent }) => (
   <View style={styles.titleRow}>
     <View style={styles.titleMarker}>
       <EventMarker
-        compact
         type={event.type}
+        illustrationScale={1.6}
         accessibilityLabel={event.title}
       />
     </View>
@@ -122,14 +135,103 @@ const EventTitle = ({event}: {event: RoadEvent}) => (
   </View>
 );
 
+export const shouldCaptureEventSheetDismiss = (
+  scrollOffset: number,
+  dy: number,
+  dx: number,
+) => scrollOffset <= 1 && dy > 12 && dy > Math.abs(dx) * 1.2;
+
+export const shouldDismissEventSheet = (dy: number, vy: number) =>
+  dy >= 110 || (dy >= 60 && vy >= 1.2);
+
 const AnimatedSheetContainer = ({
   children,
   testID,
   bottomInset = 0,
-}: PropsWithChildren<{ testID?: string; bottomInset?: number }>) => {
+  onClose,
+  registerDismiss,
+}: PropsWithChildren<{
+  testID?: string;
+  bottomInset?: number;
+  onClose: () => void;
+  registerDismiss: (dismiss: (() => void) | null) => void;
+}>) => {
+  const { height: windowHeight } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const scrollOffset = useRef(0);
+  const sheetHeight = useRef(0);
+  const closing = useRef(false);
+  const reduceMotion = useReducedMotion();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const dismiss = useCallback(() => {
+    if (closing.current) {
+      return;
+    }
+    closing.current = true;
+    Animated.timing(dragY, {
+      toValue: sheetHeight.current || windowHeight,
+      duration: reduceMotion ? 0 : 220,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        onCloseRef.current();
+      } else {
+        closing.current = false;
+        dragY.setValue(0);
+      }
+    });
+  }, [dragY, reduceMotion, windowHeight]);
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
 
   useEffect(() => {
+    registerDismiss(dismiss);
+    return () => registerDismiss(null);
+  }, [dismiss, registerDismiss]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_, gesture) =>
+        !closing.current &&
+        shouldCaptureEventSheetDismiss(
+          scrollOffset.current,
+          gesture.dy,
+          gesture.dx,
+        ),
+      onPanResponderMove: (_, gesture) => {
+        dragY.setValue(Math.max(0, gesture.dy));
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (shouldDismissEventSheet(gesture.dy, gesture.vy)) {
+          dismissRef.current();
+          return;
+        }
+
+        Animated.spring(dragY, {
+          toValue: 0,
+          damping: 22,
+          stiffness: 240,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(dragY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminationRequest: () => false,
+    }),
+  ).current;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      progress.setValue(1);
+      return;
+    }
     Animated.spring(progress, {
       toValue: 1,
       damping: 22,
@@ -137,28 +239,44 @@ const AnimatedSheetContainer = ({
       mass: 0.85,
       useNativeDriver: true,
     }).start();
-  }, [progress]);
+  }, [progress, reduceMotion]);
 
   return (
     <Animated.View
+      {...panResponder.panHandlers}
       testID={testID}
+      onLayout={event => {
+        sheetHeight.current = event.nativeEvent.layout.height;
+      }}
       style={[
         styles.container,
-        { bottom: Math.max(bottomInset, 12) },
+        { paddingBottom: bottomInset + 20, maxHeight: windowHeight * 0.82 },
         {
           opacity: progress,
           transform: [
             {
-              translateY: progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [24, 0],
-              }),
+              translateY: Animated.add(
+                progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [24, 0],
+                }),
+                dragY,
+              ),
             },
           ],
         },
       ]}
     >
-      {children}
+      <ScrollView
+        style={styles.scrollContent}
+        onScroll={event => {
+          scrollOffset.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+      >
+        {children}
+      </ScrollView>
     </Animated.View>
   );
 };
@@ -166,11 +284,15 @@ const AnimatedSheetContainer = ({
 const TomTomEventDetails = ({
   event,
   onClose,
+  onRequestClose,
+  registerDismiss,
   bottomInset,
 }: {
   event: TomTomRoadEvent;
 
   onClose: () => void;
+  onRequestClose: () => void;
+  registerDismiss: (dismiss: (() => void) | null) => void;
 
   bottomInset?: number;
 }) => {
@@ -186,6 +308,8 @@ const TomTomEventDetails = ({
     <AnimatedSheetContainer
       testID="tomtom-event-details"
       bottomInset={bottomInset}
+      onClose={onClose}
+      registerDismiss={registerDismiss}
     >
       <View style={styles.handle} />
 
@@ -201,7 +325,7 @@ const TomTomEventDetails = ({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Закрыть"
-          onPress={onClose}
+          onPress={onRequestClose}
           style={styles.closeButton}
         >
           <Text style={styles.closeText}>×</Text>
@@ -245,6 +369,7 @@ const TomTomEventDetails = ({
           ) : null}
         </View>
       ) : null}
+
     </AnimatedSheetContainer>
   );
 };
@@ -252,11 +377,15 @@ const TomTomEventDetails = ({
 const TelegramEventDetails = ({
   event,
   onClose,
+  onRequestClose,
+  registerDismiss,
   bottomInset,
 }: {
   event: TelegramRoadEvent;
 
   onClose: () => void;
+  onRequestClose: () => void;
+  registerDismiss: (dismiss: (() => void) | null) => void;
 
   bottomInset?: number;
 }) => {
@@ -264,6 +393,8 @@ const TelegramEventDetails = ({
     <AnimatedSheetContainer
       testID="telegram-event-details"
       bottomInset={bottomInset}
+      onClose={onClose}
+      registerDismiss={registerDismiss}
     >
       <View style={styles.handle} />
 
@@ -292,7 +423,7 @@ const TelegramEventDetails = ({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Закрыть"
-          onPress={onClose}
+          onPress={onRequestClose}
           style={styles.closeButton}
         >
           <Text style={styles.closeText}>×</Text>
@@ -329,10 +460,12 @@ const TelegramEventDetails = ({
       ) : null}
 
       <View style={styles.timestamps}>
-        <Text style={styles.timestamp}>
-          {formatEventTime(event.createdAt)}
-        </Text>
+        <Text style={styles.timestamp}>{formatEventTime(event.createdAt)}</Text>
       </View>
+
+      {event.status !== 'RESOLVED' ? (
+        <EventReportAction key={event.id} event={event} bottomInset={bottomInset} />
+      ) : null}
     </AnimatedSheetContainer>
   );
 };
@@ -347,27 +480,54 @@ export const EventDetailsSheet = ({
   onClose,
   bottomInset = 0,
 }: EventDetailsSheetProps) => {
+  const dismissRef = useRef<(() => void) | null>(null);
+  const registerDismiss = useCallback((dismiss: (() => void) | null) => {
+    dismissRef.current = dismiss;
+  }, []);
+  const requestClose = useCallback(() => dismissRef.current?.(), []);
   if (!event) {
     return null;
   }
 
   if (event.source === 'TOMTOM') {
     return (
-      <TomTomEventDetails
-        event={event}
-        onClose={onClose}
-        bottomInset={bottomInset}
-      />
+      <View style={styles.overlay} pointerEvents="box-none">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Закрыть событие"
+          testID="event-details-backdrop"
+          onPress={requestClose}
+          style={styles.backdrop}
+        />
+        <TomTomEventDetails
+          event={event}
+          onClose={onClose}
+          registerDismiss={registerDismiss}
+          onRequestClose={requestClose}
+          bottomInset={bottomInset}
+        />
+      </View>
     );
   }
 
   if (event.source === 'TELEGRAM' && event.type !== 'ROAD_PATROL') {
     return (
-      <TelegramEventDetails
-        event={event}
-        onClose={onClose}
-        bottomInset={bottomInset}
-      />
+      <View style={styles.overlay} pointerEvents="box-none">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Закрыть событие"
+          testID="event-details-backdrop"
+          onPress={requestClose}
+          style={styles.backdrop}
+        />
+        <TelegramEventDetails
+          event={event}
+          onClose={onClose}
+          registerDismiss={registerDismiss}
+          onRequestClose={requestClose}
+          bottomInset={bottomInset}
+        />
+      </View>
     );
   }
 
@@ -380,7 +540,7 @@ export const EventDetailsSheet = ({
 
   const isCreator = viewerRelation === 'CREATOR';
 
-  const confidencePercent = Math.round((event.confidence ?? 0.5) * 100);
+  const confidencePercent = event.confidencePercent;
 
   const isDps = event.type === 'ROAD_PATROL';
 
@@ -395,273 +555,290 @@ export const EventDetailsSheet = ({
     : null;
 
   return (
-    <AnimatedSheetContainer bottomInset={bottomInset}>
-      <View style={styles.handle} />
+    <View style={styles.overlay} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Закрыть событие"
+        testID="event-details-backdrop"
+        onPress={requestClose}
+        style={styles.backdrop}
+      />
+      <AnimatedSheetContainer
+        testID="user-event-details"
+        bottomInset={bottomInset}
+        onClose={onClose}
+        registerDismiss={registerDismiss}
+      >
+        <View style={styles.handle} />
 
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <View
-            testID={
-              event.source === 'TELEGRAM'
-                ? 'telegram-source-badge'
-                : 'user-source-badge'
-            }
-            style={styles.sourceBadge}
-          >
-            <Text style={styles.sourceBadgeText}>
-              {event.source === 'TELEGRAM' ? 'Telegram' : 'Пользователь'}
-            </Text>
-          </View>
-
-          <View style={styles.statusRow}>
-            <View
-              style={[
-                styles.statusDot,
-
-                event.status === 'ACTIVE' && styles.statusDotActive,
-
-                event.status === 'STALE' && styles.statusDotStale,
-
-                event.status === 'RESOLVED' && styles.statusDotResolved,
-              ]}
-            />
-
-            <Text style={styles.statusText}>{STATUS_LABEL[event.status]}</Text>
-          </View>
-
-          <EventTitle event={event} />
-
-          {dpsSubtitle ? (
-            <View
-              style={[
-                styles.dpsSubtitle,
-                event.status === 'STALE' && styles.dpsSubtitleWarning,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.dpsSubtitleText,
-                  event.status === 'STALE' && styles.dpsSubtitleTextWarning,
-                ]}
-              >
-                {dpsSubtitle}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Закрыть"
-          onPress={onClose}
-          style={styles.closeButton}
-        >
-          <Text style={styles.closeText}>×</Text>
-        </Pressable>
-      </View>
-
-      {event.description ? (
-        <Text style={styles.description}>{event.description}</Text>
-      ) : null}
-
-      {event.source === 'TELEGRAM' ? (
-        <>
-          <View style={styles.telegramLocation}>
-            {event.locationLabel ? (
-              <Text style={styles.telegramLocationTitle}>
-                {event.locationLabel}
-              </Text>
-            ) : null}
-            <Text style={styles.telegramPrecision}>
-              {LOCATION_PRECISION_LABEL[event.locationPrecision]}
-            </Text>
-          </View>
-
-          {event.sourceText ? (
-            <View style={styles.telegramSourceText}>
-              <Text style={styles.telegramSourceTextLabel}>
-                Исходное сообщение
-              </Text>
-              <Text style={styles.telegramSourceTextValue}>
-                {event.sourceText}
-              </Text>
-            </View>
-          ) : null}
-        </>
-      ) : null}
-
-      <View style={styles.metrics}>
-        <View style={styles.metric}>
-          <Text style={styles.metricValue}>{confidencePercent}%</Text>
-
-          <Text style={styles.metricLabel}>доверие</Text>
-        </View>
-
-        <View style={styles.metricDivider} />
-
-        <View style={styles.metric}>
-          <Text style={styles.metricValue}>{event.confirmationCount ?? 0}</Text>
-
-          <Text style={styles.metricLabel}>актуально</Text>
-        </View>
-
-        <View style={styles.metricDivider} />
-
-        <View style={styles.metric}>
-          <Text style={styles.metricValue}>{event.rejectionCount ?? 0}</Text>
-
-          <Text style={styles.metricLabel}>уже нет</Text>
-        </View>
-      </View>
-
-      <View style={styles.timestamps}>
-        <Text style={styles.timestamp}>
-          {formatEventTime(event.createdAt)}
-        </Text>
-
-        {event.lastConfirmedAt ? (
-          <Text style={styles.timestamp}>
-            Подтверждено: {formatEventTime(event.lastConfirmedAt)}
-          </Text>
-        ) : null}
-      </View>
-
-      <View style={styles.feedbackSection}>
-        {isCreator ? (
-          <View style={styles.relationCard}>
-            <Text style={styles.relationIcon}>✓</Text>
-
-            <View style={styles.relationContent}>
-              <Text style={styles.relationTitle}>
-                Вы сообщили об этом событии
-              </Text>
-
-              <Text style={styles.relationDescription}>
-                Ваше сообщение уже учтено как первый сигнал. Подтверждать
-                собственную метку повторно не нужно.
-              </Text>
-            </View>
-          </View>
-        ) : effectiveFeedback ? (
-          <View style={styles.relationCard}>
-            <Text style={styles.relationIcon}>✓</Text>
-
-            <View style={styles.relationContent}>
-              <Text style={styles.relationTitle}>
-                {effectiveFeedback === 'CONFIRM'
-                  ? 'Вы подтвердили актуальность'
-                  : 'Вы отметили, что события уже нет'}
-              </Text>
-
-              <Text style={styles.relationDescription}>
-                Ваш ответ уже учтён в оценке актуальности этого события.
-              </Text>
-            </View>
-          </View>
-        ) : (
-          <>
-            <Text style={styles.feedbackTitle}>Событие ещё актуально?</Text>
-
-            {feedbackError ? (
-              <View
-                accessibilityRole="summary"
-                style={[
-                  styles.feedbackError,
-
-                  feedbackError.kind === 'rateLimit' &&
-                    styles.feedbackErrorRateLimit,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.feedbackErrorIcon,
-
-                    feedbackError.kind === 'rateLimit' &&
-                      styles.feedbackErrorIconRateLimit,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.feedbackErrorIconText,
-
-                      feedbackError.kind === 'rateLimit' &&
-                        styles.feedbackErrorIconTextRateLimit,
-                    ]}
-                  >
-                    !
-                  </Text>
-                </View>
-
-                <View style={styles.feedbackErrorContent}>
-                  <Text
-                    style={[
-                      styles.feedbackErrorTitle,
-
-                      feedbackError.kind === 'rateLimit' &&
-                        styles.feedbackErrorTitleRateLimit,
-                    ]}
-                  >
-                    {feedbackError.title}
-                  </Text>
-
-                  <Text
-                    style={[
-                      styles.feedbackErrorDescription,
-
-                      feedbackError.kind === 'rateLimit' &&
-                        styles.feedbackErrorDescriptionRateLimit,
-                    ]}
-                  >
-                    {feedbackError.description}
-                  </Text>
-                </View>
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            {event.source === 'TELEGRAM' ? (
+              <View testID="telegram-source-badge" style={styles.sourceBadge}>
+                <Text style={styles.sourceBadgeText}>Telegram</Text>
               </View>
             ) : null}
 
-            <View style={styles.feedbackActions}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Подтвердить актуальность события"
-                disabled={isSubmitting}
-                onPress={() => onFeedback('CONFIRM')}
-                style={({ pressed }) => [
-                  styles.confirmButton,
+            <EventTitle event={event} />
 
-                  pressed && styles.buttonPressed,
+            <View style={styles.statusRow}>
+              <View
+                style={[
+                  styles.statusDot,
 
-                  isSubmitting && styles.buttonDisabled,
+                  event.status === 'ACTIVE' && styles.statusDotActive,
+
+                  event.status === 'STALE' && styles.statusDotStale,
+
+                  event.status === 'RESOLVED' && styles.statusDotResolved,
                 ]}
-              >
-                {isSubmitting && pendingAction === 'CONFIRM' ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.confirmButtonText}>✓ Актуально</Text>
-                )}
-              </Pressable>
+              />
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Сообщить, что события уже нет"
-                disabled={isSubmitting}
-                onPress={() => onFeedback('REJECT')}
-                style={({ pressed }) => [
-                  styles.rejectButton,
-
-                  pressed && styles.buttonPressed,
-
-                  isSubmitting && styles.buttonDisabled,
-                ]}
-              >
-                {isSubmitting && pendingAction === 'REJECT' ? (
-                  <ActivityIndicator size="small" color="#D94348" />
-                ) : (
-                  <Text style={styles.rejectButtonText}>× Уже нет</Text>
-                )}
-              </Pressable>
+              <Text style={styles.statusText}>
+                {STATUS_LABEL[event.status]}
+              </Text>
             </View>
+
+            {dpsSubtitle ? (
+              <View
+                style={[
+                  styles.dpsSubtitle,
+                  event.status === 'STALE' && styles.dpsSubtitleWarning,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dpsSubtitleText,
+                    event.status === 'STALE' && styles.dpsSubtitleTextWarning,
+                  ]}
+                >
+                  {dpsSubtitle}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Закрыть"
+            onPress={requestClose}
+            style={styles.closeButton}
+          >
+            <Text style={styles.closeText}>×</Text>
+          </Pressable>
+        </View>
+
+        {event.description ? (
+          <Text style={styles.description}>{event.description}</Text>
+        ) : null}
+
+        {event.source === 'TELEGRAM' ? (
+          <>
+            <View style={styles.telegramLocation}>
+              {event.locationLabel ? (
+                <Text style={styles.telegramLocationTitle}>
+                  {event.locationLabel}
+                </Text>
+              ) : null}
+              <Text style={styles.telegramPrecision}>
+                {LOCATION_PRECISION_LABEL[event.locationPrecision]}
+              </Text>
+            </View>
+
+            {event.sourceText ? (
+              <View style={styles.telegramSourceText}>
+                <Text style={styles.telegramSourceTextLabel}>
+                  Исходное сообщение
+                </Text>
+                <Text style={styles.telegramSourceTextValue}>
+                  {event.sourceText}
+                </Text>
+              </View>
+            ) : null}
           </>
-        )}
-      </View>
-    </AnimatedSheetContainer>
+        ) : null}
+
+        <View style={styles.metrics}>
+          <View style={styles.metric}>
+            <Text style={styles.metricValue}>
+              {confidencePercent === undefined ? '—' : `${confidencePercent}%`}
+            </Text>
+
+            <Text style={styles.metricLabel}>доверие</Text>
+          </View>
+
+          <View style={styles.metricDivider} />
+
+          <View style={styles.metric}>
+            <Text style={styles.metricValue}>
+              {event.confirmationCount ?? 0}
+            </Text>
+
+            <Text style={styles.metricLabel}>актуально</Text>
+          </View>
+
+          <View style={styles.metricDivider} />
+
+          <View style={styles.metric}>
+            <Text style={styles.metricValue}>{event.rejectionCount ?? 0}</Text>
+
+            <Text style={styles.metricLabel}>уже нет</Text>
+          </View>
+        </View>
+
+        <View style={styles.timestamps}>
+          <Text style={styles.timestamp}>
+            {formatEventTime(event.createdAt)}
+          </Text>
+
+          {event.lastConfirmedAt ? (
+            <Text style={styles.timestamp}>
+              Подтверждено: {formatEventTime(event.lastConfirmedAt)}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={styles.feedbackSection}>
+          {isCreator ? (
+            <View style={styles.relationCard}>
+              <Text style={styles.relationIcon}>✓</Text>
+
+              <View style={styles.relationContent}>
+                <Text style={styles.relationTitle}>
+                  Вы сообщили об этом событии
+                </Text>
+
+                <Text style={styles.relationDescription}>
+                  Ваше сообщение уже учтено как первый сигнал. Подтверждать
+                  собственную метку повторно не нужно.
+                </Text>
+              </View>
+            </View>
+          ) : effectiveFeedback ? (
+            <View style={styles.relationCard}>
+              <Text style={styles.relationIcon}>✓</Text>
+
+              <View style={styles.relationContent}>
+                <Text style={styles.relationTitle}>
+                  {effectiveFeedback === 'CONFIRM'
+                    ? 'Вы подтвердили актуальность'
+                    : 'Вы отметили, что события уже нет'}
+                </Text>
+
+                <Text style={styles.relationDescription}>
+                  Ваш ответ уже учтён в оценке актуальности этого события.
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.feedbackTitle}>Событие ещё актуально?</Text>
+
+              {feedbackError ? (
+                <View
+                  accessibilityRole="summary"
+                  style={[
+                    styles.feedbackError,
+
+                    feedbackError.kind === 'rateLimit' &&
+                      styles.feedbackErrorRateLimit,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.feedbackErrorIcon,
+
+                      feedbackError.kind === 'rateLimit' &&
+                        styles.feedbackErrorIconRateLimit,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.feedbackErrorIconText,
+
+                        feedbackError.kind === 'rateLimit' &&
+                          styles.feedbackErrorIconTextRateLimit,
+                      ]}
+                    >
+                      !
+                    </Text>
+                  </View>
+
+                  <View style={styles.feedbackErrorContent}>
+                    <Text
+                      style={[
+                        styles.feedbackErrorTitle,
+
+                        feedbackError.kind === 'rateLimit' &&
+                          styles.feedbackErrorTitleRateLimit,
+                      ]}
+                    >
+                      {feedbackError.title}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.feedbackErrorDescription,
+
+                        feedbackError.kind === 'rateLimit' &&
+                          styles.feedbackErrorDescriptionRateLimit,
+                      ]}
+                    >
+                      {feedbackError.description}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={styles.feedbackActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Подтвердить актуальность события"
+                  disabled={isSubmitting}
+                  onPress={() => onFeedback('CONFIRM')}
+                  style={({ pressed }) => [
+                    styles.confirmButton,
+
+                    pressed && styles.buttonPressed,
+
+                    isSubmitting && styles.buttonDisabled,
+                  ]}
+                >
+                  {isSubmitting && pendingAction === 'CONFIRM' ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>✓ Актуально</Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Сообщить, что события уже нет"
+                  disabled={isSubmitting}
+                  onPress={() => onFeedback('REJECT')}
+                  style={({ pressed }) => [
+                    styles.rejectButton,
+
+                    pressed && styles.buttonPressed,
+
+                    isSubmitting && styles.buttonDisabled,
+                  ]}
+                >
+                  {isSubmitting && pendingAction === 'REJECT' ? (
+                    <ActivityIndicator size="small" color="#D94348" />
+                  ) : (
+                    <Text style={styles.rejectButtonText}>× Уже нет</Text>
+                  )}
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+
+        {event.status !== 'RESOLVED' ? (
+          <EventReportAction key={event.id} event={event} bottomInset={bottomInset} />
+        ) : null}
+      </AnimatedSheetContainer>
+    </View>
   );
 };

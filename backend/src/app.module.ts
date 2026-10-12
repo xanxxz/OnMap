@@ -9,12 +9,14 @@ import { HealthModule } from './health/health.module';
 import { IdentityModule } from './identity/identity.module';
 
 import { TelegramIngestionRuntimeModule } from './integrations/telegram/runtime/telegram-ingestion-runtime.module';
+import { TelegramModerationBotModule } from './integrations/telegram/moderation/telegram-moderation-bot.module';
 
 import { TomTomModule } from './integrations/tomtom/tomtom.module';
 
 import { RoadEventsModule } from './road-events/road-events.module';
-
-import { WeatherModule } from './weather/weather.module';
+import { PartnerPlacementsModule } from './partner-placements/partner-placements.module';
+import { parseAllowedOrigins } from './cors/allowed-origins';
+import { PushModule } from './push/push.module';
 
 const DEFAULT_PORT = 4000;
 
@@ -46,6 +48,12 @@ export const validateEnvironment = (environment: Record<string, unknown>) => {
 
   const configuredPort = environment.PORT;
 
+  const corsAllowedOrigins = parseAllowedOrigins(
+    typeof environment.CORS_ALLOWED_ORIGINS === 'string'
+      ? environment.CORS_ALLOWED_ORIGINS
+      : undefined,
+  );
+
   let port = DEFAULT_PORT;
 
   if (configuredPort !== undefined) {
@@ -74,6 +82,8 @@ export const validateEnvironment = (environment: Record<string, unknown>) => {
 
     IDENTITY_SIGNING_SECRET: identitySigningSecret,
 
+    CORS_ALLOWED_ORIGINS: corsAllowedOrigins.join(','),
+
     PORT: port,
   };
 };
@@ -94,11 +104,15 @@ export const validateEnvironment = (environment: Record<string, unknown>) => {
 
     TelegramIngestionRuntimeModule,
 
+    TelegramModerationBotModule,
+
     TomTomModule,
 
     RoadEventsModule,
 
-    WeatherModule,
+    PartnerPlacementsModule,
+
+    PushModule,
   ],
 })
 export class AppModule {}

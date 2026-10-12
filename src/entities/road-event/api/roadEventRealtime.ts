@@ -17,6 +17,7 @@ export const ROAD_EVENT_REALTIME_EVENTS = {
   created: 'road-event:created',
   updated: 'road-event:updated',
   resolved: 'road-event:resolved',
+  hidden: 'road-event:hidden',
 } as const;
 
 export interface RoadEventResolvedPayload {
@@ -52,6 +53,7 @@ const ROAD_EVENT_STATUSES: RoadEventStatus[] = [
   'ACTIVE',
   'UNCONFIRMED',
   'STALE',
+  'HIDDEN_PENDING_REVIEW',
   'RESOLVED',
 ];
 
@@ -173,6 +175,9 @@ const parseUserRoadEvent = (
 
   return {
     ...(value as Omit<UserRoadEvent, 'source' | 'geometry' | 'coordinate'>),
+    ...(optionalNumber(value.confidencePercent) !== undefined && {
+      confidencePercent: optionalNumber(value.confidencePercent),
+    }),
     source: 'USER',
     geometry: {
       type: 'Point',
@@ -246,6 +251,9 @@ const parseTelegramRoadEvent = (
     }),
     ...(optionalNumber(value.confidence) !== undefined && {
       confidence: optionalNumber(value.confidence),
+    }),
+    ...(optionalNumber(value.confidencePercent) !== undefined && {
+      confidencePercent: optionalNumber(value.confidencePercent),
     }),
     ...(['CREATOR', 'CONFIRM', 'REJECT'].includes(
       String(value.viewerRelation),

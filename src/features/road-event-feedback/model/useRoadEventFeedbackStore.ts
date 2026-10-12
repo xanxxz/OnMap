@@ -13,7 +13,7 @@ import {
 
 import {
   RoadEventFeedbackAction,
-} from '../../../entities/road-event/lib/roadEventFreshness';
+} from '../../../entities/road-event/model/roadEvent';
 
 const feedbackStorage =
   createAsyncStorage(

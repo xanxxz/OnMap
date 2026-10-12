@@ -4,6 +4,8 @@ import {RootNavigator} from '../navigation/RootNavigator';
 import {LaunchScreen} from '../../screens/LaunchScreen/LaunchScreen';
 import {OnboardingScreen} from '../../screens/OnboardingScreen/OnboardingScreen';
 import {motion} from '../../shared/theme';
+import {requestLocationPermission} from '../../features/user-location/useLocationPermission';
+import {requestNotificationPermissionOnce} from '../../features/notifications/notificationPermission';
 
 import {
   completeCurrentOnboarding,
@@ -57,6 +59,8 @@ export const AppLaunchGate = () => {
     return (
       <OnboardingScreen
         onComplete={async () => {
+          await requestLocationPermission().catch(() => false);
+          await requestNotificationPermissionOnce().catch(() => 'unavailable');
           await completeCurrentOnboarding();
           setDestination('map');
         }}

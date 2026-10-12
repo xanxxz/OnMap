@@ -7,16 +7,22 @@ import {
   isCoordinateInsideCityCoverage,
 } from '../../../cities/city.registry';
 import { PrismaService } from '../../../database/prisma.service';
+import { sanitizeTelegramSourceText } from '../../../road-events/telegram-source-text';
 import {
   ROAD_EVENT_DEDUPLICATION,
   ROAD_EVENT_TITLE_BY_TYPE,
   ROAD_PATROL_LIFECYCLE,
-  TELEGRAM_EVENT_TTL_MS,
 } from '../../../road-events/road-events.constants';
+import {
+  ROAD_EVENT_CONFIDENCE,
+  ROAD_EVENT_TELEGRAM_TTL_MS,
+  expiryAfterSignal,
+} from '../../../road-events/road-event-confidence';
 import type { RoadEventType } from '../../../road-events/road-events.constants';
 import type { NormalizedTelegramEvent } from '../ingestion/telegram-ingestion.types';
 import { isMorePreciseLocation } from '../location-resolver/telegram-location-precision';
 import type { TelegramLocationPrecision } from '../location-resolver/telegram-location-precision';
+import { queueRoadEventPush } from '../../../push/push-queue';
 
 import {
   TELEGRAM_PERSISTENCE_TARGET_MATCH_WINDOW_MS,
@@ -166,6 +172,7 @@ export class TelegramIngestionPersistenceService {
       expiresAt,
       applied.locationPrecision,
       true,
+      false,
     );
 
     if (rows[0] === undefined) {
@@ -213,6 +220,7 @@ export class TelegramIngestionPersistenceService {
           expiresAt,
           duplicate[0].locationPrecision,
           false,
+          true,
         );
         await this.insertMessageMapping(
           transaction,
@@ -304,6 +312,13 @@ export class TelegramIngestionPersistenceService {
     }
 
     await this.insertMessageMapping(transaction, event, created.id, 'CREATED');
+    if (process.env.PUSH_ENQUEUE_ENABLED === 'true') {
+      await queueRoadEventPush(transaction, {
+        id: created.id,
+        cityId: candidate.cityId,
+        type: candidate.type,
+      });
+    }
 
     return { status: 'CREATED', roadEventId: created.id };
   }
@@ -377,6 +392,7 @@ export class TelegramIngestionPersistenceService {
         expiresAt,
         target.locationPrecision,
         false,
+        true,
       );
       await this.insertMessageMapping(transaction, event, target.id, 'UPDATED');
 
@@ -430,6 +446,7 @@ export class TelegramIngestionPersistenceService {
     expiresAt: Date,
     currentPrecision: TelegramLocationPrecision | null | undefined,
     updateSourceText: boolean,
+    countConfirmation: boolean,
   ): Promise<readonly TelegramRoadEventInsertRow[]> {
     const shouldRefine = isMorePreciseLocation(
       candidate.locationPrecision,
@@ -454,9 +471,33 @@ export class TelegramIngestionPersistenceService {
             WHEN ${updateSourceText} THEN ${candidate.sourceText}
             ELSE event.source_text
           END,
-          expires_at = ${expiresAt},
+          expires_at = CASE
+            WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(event.last_confirmed_at, event.created_at)
+              THEN GREATEST(event.expires_at, ${expiresAt})
+            ELSE event.expires_at
+          END,
+          last_confirmed_at = CASE
+            WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(event.last_confirmed_at, event.created_at) THEN GREATEST(
+              COALESCE(event.last_confirmed_at, event.created_at),
+              ${candidate.timestamp}
+            )
+            ELSE event.last_confirmed_at
+          END,
+          confidence = CASE
+            WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(event.last_confirmed_at, event.created_at) THEN LEAST(
+              ${ROAD_EVENT_CONFIDENCE.maximum},
+              GREATEST(event.confidence, ${candidate.parserConfidence}) + ${ROAD_EVENT_CONFIDENCE.confirmationBoost}
+            )
+            ELSE event.confidence
+          END,
+          confirmation_count = event.confirmation_count + CASE
+            WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(event.last_confirmed_at, event.created_at) THEN 1
+            ELSE 0
+          END,
           status = CASE
             WHEN ${candidate.type}::"RoadEventType" = 'ROAD_PATROL'::"RoadEventType"
+              AND ${countConfirmation}
+              AND ${candidate.timestamp} >= COALESCE(event.last_confirmed_at, event.created_at)
               THEN 'ACTIVE'::"RoadEventStatus"
             ELSE event.status
           END,
@@ -483,9 +524,33 @@ export class TelegramIngestionPersistenceService {
           WHEN ${updateSourceText} THEN ${candidate.sourceText}
           ELSE source_text
         END,
-        expires_at = ${expiresAt},
+        expires_at = CASE
+          WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(last_confirmed_at, created_at)
+            THEN GREATEST(expires_at, ${expiresAt})
+          ELSE expires_at
+        END,
+        last_confirmed_at = CASE
+          WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(last_confirmed_at, created_at) THEN GREATEST(
+            COALESCE(last_confirmed_at, created_at),
+            ${candidate.timestamp}
+          )
+          ELSE last_confirmed_at
+        END,
+        confidence = CASE
+          WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(last_confirmed_at, created_at) THEN LEAST(
+            ${ROAD_EVENT_CONFIDENCE.maximum},
+            GREATEST(confidence, ${candidate.parserConfidence}) + ${ROAD_EVENT_CONFIDENCE.confirmationBoost}
+          )
+          ELSE confidence
+        END,
+        confirmation_count = confirmation_count + CASE
+          WHEN ${countConfirmation} AND ${candidate.timestamp} >= COALESCE(last_confirmed_at, created_at) THEN 1
+          ELSE 0
+        END,
         status = CASE
           WHEN ${candidate.type}::"RoadEventType" = 'ROAD_PATROL'::"RoadEventType"
+            AND ${countConfirmation}
+            AND ${candidate.timestamp} >= COALESCE(last_confirmed_at, created_at)
             THEN 'ACTIVE'::"RoadEventStatus"
           ELSE status
         END,
@@ -754,8 +819,12 @@ export class TelegramIngestionPersistenceService {
       longitude,
       geometry: event.geometry,
       locationPrecision: event.locationPrecision,
-      locationLabel: event.canonicalLocationTitle ?? event.locationInput,
-      sourceText: event.sourceText,
+      locationLabel:
+        sanitizeTelegramSourceText(
+          event.canonicalLocationTitle ?? event.locationInput ?? '',
+        ) ?? null,
+      sourceText: sanitizeTelegramSourceText(event.sourceText) ?? null,
+      parserConfidence: event.parserConfidence,
     };
   }
 
@@ -768,24 +837,20 @@ export class TelegramIngestionPersistenceService {
     sourceTimestamp: Date,
     createdAt: Date = sourceTimestamp,
   ): Date {
-    const ttlMs = TELEGRAM_EVENT_TTL_MS[type];
+    const ttlMs = ROAD_EVENT_TELEGRAM_TTL_MS[type];
 
     if (ttlMs === undefined) {
       throw new Error(`Missing Telegram lifecycle TTL for event type: ${type}`);
     }
 
-    const rollingExpiry = sourceTimestamp.getTime() + ttlMs;
-
-    if (type !== 'ROAD_PATROL') {
-      return new Date(rollingExpiry);
-    }
-
-    return new Date(
-      Math.min(
-        rollingExpiry,
-        createdAt.getTime() + ROAD_PATROL_LIFECYCLE.maxLifetimeMs,
-      ),
-    );
+    return expiryAfterSignal({
+      action: 'CONFIRM',
+      type,
+      source: 'TELEGRAM',
+      createdAt,
+      currentExpiresAt: sourceTimestamp,
+      now: sourceTimestamp,
+    });
   }
 
   private isNewerMessageVersion(

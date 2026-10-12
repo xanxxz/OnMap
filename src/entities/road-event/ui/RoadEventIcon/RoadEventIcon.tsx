@@ -12,13 +12,15 @@ import {EventMarker} from '../EventMarker/EventMarker';
 
 interface RoadEventIconProps {
   type: RoadEventType;
+  compact?: boolean;
 }
 
 export const RoadEventIcon = ({
   type,
+  compact = true,
 }: RoadEventIconProps) => {
   const meta =
     ROAD_EVENT_META[type];
 
-  return <EventMarker type={type} compact accessibilityLabel={meta.label} />;
+  return <EventMarker type={type} compact={compact} accessibilityLabel={meta.label} />;
 };

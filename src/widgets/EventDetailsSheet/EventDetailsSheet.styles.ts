@@ -3,12 +3,21 @@ import { StyleSheet } from 'react-native';
 import { colors, radius, shadows, typography } from '../../shared/theme';
 
 export const styles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 10,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFill,
+  },
   container: {
     position: 'absolute',
 
-    left: 12,
+    left: 0,
 
-    right: 12,
+    right: 0,
+
+    bottom: 0,
 
     zIndex: 10,
 
@@ -18,11 +27,17 @@ export const styles = StyleSheet.create({
 
     paddingBottom: 20,
 
-    borderRadius: radius[28],
+    borderTopLeftRadius: radius[28],
+
+    borderTopRightRadius: radius[28],
 
     backgroundColor: colors.surface,
 
     ...shadows.sheet,
+  },
+
+  scrollContent: {
+    flexGrow: 0,
   },
 
   handle: {
@@ -60,7 +75,7 @@ export const styles = StyleSheet.create({
 
     gap: 6,
 
-    marginBottom: 7,
+    marginTop: 6,
   },
 
   statusDot: {
@@ -130,19 +145,19 @@ export const styles = StyleSheet.create({
 
     alignItems: 'center',
 
-    gap: 8,
+    gap: 12,
   },
 
   titleMarker: {
-    width: 36,
+    width: 68,
 
-    height: 36,
+    height: 68,
 
     alignItems: 'center',
 
     justifyContent: 'center',
 
-    overflow: 'hidden',
+    overflow: 'visible',
   },
 
   dpsSubtitle: {

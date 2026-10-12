@@ -58,5 +58,6 @@ export interface TelegramPersistenceCandidate {
   readonly geometry: ExternalRoadEventGeometry;
   readonly locationPrecision: TelegramLocationPrecision;
   readonly locationLabel: string | null;
-  readonly sourceText: string;
+  readonly sourceText: string | null;
+  readonly parserConfidence: number;
 }

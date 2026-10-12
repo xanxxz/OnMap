@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { View } from 'react-native';
+import { AppState, Linking, StyleSheet, View } from 'react-native';
 
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
@@ -29,6 +29,36 @@ describe('MapHeader', () => {
 
   afterEach(() => {
     act(() => renderer?.unmount());
+    jest.restoreAllMocks();
+  });
+
+  it('offers the real support chat from the city selector', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+
+    act(() => {
+      renderer = create(
+        <MapHeader
+          city={balakovoCity}
+          cities={[balakovoCity]}
+          dpsActivity={null}
+          eventCount={0}
+          realtimeStatus="connected"
+          onSelectCity={jest.fn()}
+        />,
+      );
+    });
+
+    act(() => {
+      renderer.root.findByProps({testID: 'city-header-button'}).props.onPress();
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({
+        accessibilityLabel: 'Открыть поддержку @onMapSupport',
+      }).props.onPress();
+    });
+
+    expect(openURL).toHaveBeenCalledWith('https://t.me/onMapSupport');
   });
 
   it('shows the city and selects another registry entry', () => {
@@ -62,6 +92,38 @@ describe('MapHeader', () => {
     expect(onSelectCity).toHaveBeenCalledWith('second-city');
   });
 
+  it('uses a centered disclosure icon while keeping city selection on the full card', () => {
+    const onSelectCity = jest.fn();
+
+    act(() => {
+      renderer = create(
+        <MapHeader
+          city={balakovoCity}
+          cities={[balakovoCity]}
+          dpsActivity={null}
+          eventCount={0}
+          realtimeStatus="connected"
+          onSelectCity={onSelectCity}
+        />,
+      );
+    });
+
+    const chevron = renderer.root.findByProps({testID: 'city-header-chevron'});
+    expect(
+      chevron.findAllByType(View).filter(node => node !== chevron),
+    ).toHaveLength(1);
+    expect(
+      renderer.root.findAll(
+        node => node.type === require('react-native').Text && node.props.children === '⌄',
+      ),
+    ).toHaveLength(0);
+
+    act(() => {
+      renderer.root.findByProps({testID: 'city-header-button'}).props.onPress();
+    });
+    expect(renderer.root.findByProps({testID: 'city-header-button'})).toBeDefined();
+  });
+
   it('shows the citywide DPS total including unlocated reports', () => {
     act(() => {
       renderer = create(
@@ -89,5 +151,94 @@ describe('MapHeader', () => {
 
     expect(text).toContain('3');
     expect(text).toContain('2 на карте\n1 без точки');
+  });
+
+  it('shows no partner block without a backend banner and opens the provided banner URL', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    const onBannerPress = jest.fn();
+    const common = {
+      city: balakovoCity,
+      cities: [balakovoCity],
+      dpsActivity: null,
+      eventCount: 0,
+      realtimeStatus: 'connected' as const,
+      onSelectCity: jest.fn(),
+    };
+    act(() => { renderer = create(<MapHeader {...common} partnerBanner={null} />); });
+    expect(renderer.root.findAllByProps({testID: 'partner-banner'})).toHaveLength(0);
+
+    act(() => renderer.update(<MapHeader {...common} onPartnerBannerPress={onBannerPress} partnerBanner={{
+      id: 'banner-1', cityId: 'balakovo', partnerPointId: 'point-1',
+      title: 'Мастерская рядом', text: 'Сервис для автомобиля',
+      button: {label: 'Подробнее', url: 'https://example.com/'},
+      startsAt: '', endsAt: '',
+    }} />));
+    expect(renderer.root.findAllByType(View).filter(node => node.props.testID === 'partner-banner')).toHaveLength(1);
+    await act(async () => {
+      renderer.root.findByProps({accessibilityLabel: 'Подробнее'}).props.onPress();
+    });
+    expect(openURL).toHaveBeenCalledWith('https://example.com/');
+    expect(onBannerPress).toHaveBeenCalledWith('banner-1');
+  });
+
+  it('uses the linked point colors on the banner when supplied by the API', () => {
+    act(() => { renderer = create(<MapHeader
+      city={balakovoCity} cities={[balakovoCity]} dpsActivity={null}
+      eventCount={0} realtimeStatus="connected" onSelectCity={jest.fn()}
+      partnerBanner={{id: 'banner-1', cityId: 'balakovo', partnerPointId: 'point-1',
+        title: 'Мастерская рядом', text: 'Сервис для автомобиля',
+        button: {label: 'Подробнее', url: 'https://example.com/'},
+        startsAt: '', endsAt: '',
+        appearance: {backgroundColor: '#F7F4EA', textColor: '#14241E'}}}
+    />); });
+    const banner = renderer.root.findByProps({testID: 'partner-banner'});
+    expect(StyleSheet.flatten(banner.props.style).backgroundColor).toBe('#F7F4EA');
+    expect(StyleSheet.flatten(renderer.root.findByProps({children: 'Мастерская рядом'}).props.style).color).toBe('#14241E');
+  });
+
+  it('counts an impression only after one second of laid-out, active visibility, not on rerender', () => {
+    jest.useFakeTimers();
+    const previousState = AppState.currentState;
+    Object.defineProperty(AppState, 'currentState', {value: 'active', configurable: true});
+    const onImpression = jest.fn();
+    const banner = {id: 'banner-1', cityId: 'balakovo', partnerPointId: 'point-1',
+      title: 'Мастерская', text: 'Описание', button: {label: 'Подробнее', url: 'https://example.com'},
+      startsAt: '', endsAt: ''};
+    const props = {city: balakovoCity, cities: [balakovoCity], dpsActivity: null,
+      eventCount: 0, realtimeStatus: 'connected' as const, onSelectCity: jest.fn(),
+      partnerBanner: banner, onPartnerBannerImpression: onImpression};
+    act(() => { renderer = create(<MapHeader {...props} />); });
+    act(() => jest.advanceTimersByTime(2000));
+    expect(onImpression).not.toHaveBeenCalled();
+    act(() => renderer.root.findByProps({testID: 'partner-banner'}).props.onLayout({nativeEvent: {layout: {width: 250, height: 100}}}));
+    act(() => jest.advanceTimersByTime(999));
+    expect(onImpression).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(1));
+    expect(onImpression).toHaveBeenCalledTimes(1);
+    act(() => renderer.update(<MapHeader {...props} />));
+    act(() => jest.advanceTimersByTime(2000));
+    expect(onImpression).toHaveBeenCalledTimes(1);
+    Object.defineProperty(AppState, 'currentState', {value: previousState, configurable: true});
+    jest.useRealTimers();
+  });
+
+  it('does not count a banner obscured before the visibility threshold', () => {
+    jest.useFakeTimers();
+    const previousState = AppState.currentState;
+    Object.defineProperty(AppState, 'currentState', {value: 'active', configurable: true});
+    const onImpression = jest.fn();
+    const props = {city: balakovoCity, cities: [balakovoCity], dpsActivity: null,
+      eventCount: 0, realtimeStatus: 'connected' as const, onSelectCity: jest.fn(),
+      partnerBanner: {id: 'banner-hidden', cityId: 'balakovo', partnerPointId: 'point-1',
+        title: 'Мастерская', text: 'Описание', button: {label: 'Подробнее', url: 'https://example.com'},
+        startsAt: '', endsAt: ''}, onPartnerBannerImpression: onImpression};
+    act(() => { renderer = create(<MapHeader {...props} partnerBannerVisible />); });
+    act(() => renderer.root.findByProps({testID: 'partner-banner'}).props.onLayout({nativeEvent: {layout: {width: 250, height: 100}}}));
+    act(() => jest.advanceTimersByTime(500));
+    act(() => renderer.update(<MapHeader {...props} partnerBannerVisible={false} />));
+    act(() => jest.advanceTimersByTime(1500));
+    expect(onImpression).not.toHaveBeenCalled();
+    Object.defineProperty(AppState, 'currentState', {value: previousState, configurable: true});
+    jest.useRealTimers();
   });
 });
