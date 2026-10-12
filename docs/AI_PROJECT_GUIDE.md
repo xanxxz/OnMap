@@ -45,7 +45,7 @@ NestJS :4000
 | screens | `src/screens/` | `MapScreen`, `LaunchScreen`, `OnboardingScreen` |
 | widgets | `src/widgets/` | `RoadMap`, `EventDetailsSheet`, `ReportEventSheet` |
 | features | `src/features/` | отчёт, фильтр, feedback, геолокация, контролы карты |
-| entities | `src/entities/` | `road-event`, `weather` |
+| entities | `src/entities/` | `road-event` |
 | shared | `src/shared/` | env, HTTP, socket, theme, cities, map helpers |
 
 Backend модули (`backend/src/app.module.ts`):
@@ -56,7 +56,6 @@ Backend модули (`backend/src/app.module.ts`):
 - `RoadEventsModule` — CRUD-подобное API событий + gateway + DPS tracker
 - `TelegramIngestionRuntimeModule` — опциональный live-ingest
 - `TomTomModule` — traffic incidents
-- `WeatherModule` — Yandex Weather informers
 
 ---
 
@@ -72,7 +71,7 @@ Backend модули (`backend/src/app.module.ts`):
 - `src/shared/realtime/socketClient.ts` — один ленивый `socket.io-client`.
 - `src/shared/config/cities/` — фронтовый реестр города (центр `[lng, lat]`).
 - `src/entities/road-event/api/httpRoadEventRepository.ts` — единственный используемый репозиторий событий.
-- `src/entities/road-event/api/mockRoadEventRepository.ts` — **не импортируется** (мёртвый код).
+- `backend/src/road-events/road-event-confidence.ts` — серверная политика доверия и TTL для сохранённых событий.
 - `src/entities/road-event/model/useRoadEvents.ts` — TanStack Query viewport list.
 - `src/entities/road-event/model/useRoadEventRealtime.ts` — подписка на комнату города.
 - `src/widgets/RoadMap/RoadMap.tsx` — MapLibre Map/Camera/UserLocation/слои.
@@ -124,7 +123,7 @@ npm run start:dev     # watch
 
 Telegram **выключен**, пока `TELEGRAM_INGESTION_ENABLED` не `true` и не заданы `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`, `TELEGRAM_SOURCE_CHAT_ID`.
 
-TomTom/Weather опциональны: без ключей инциденты/погода просто отсутствуют (пустой массив / `null`).
+TomTom опционален: без ключа TomTom-инциденты отсутствуют. Погода в продуктовый runtime не подключена.
 
 ### Frontend
 
@@ -190,7 +189,7 @@ CI в репозитории **нет** (нет `.github/`).
 5. После load/region change `RoadMap` отдаёт viewport bounds `[west, south, east, north]`.
 6. `useRoadEvents(cityId, bounds)` → `GET /api/road-events?...` с Bearer.
 7. `useRoadEventRealtime(cityId)` подключается к Socket.IO и emit `road-events:subscribe`.
-8. Параллельно `GET /api/road-events/dps-summary` и `GET /api/weather?cityId=`.
+8. Параллельно `GET /api/road-events/dps-summary`.
 9. Long press / кнопка отчёта → `ReportEventSheet` → `POST /api/road-events`.
 10. Тап по маркеру → `EventDetailsSheet` → confirm/reject → `POST /api/road-events/:id/feedback`.
 
@@ -342,7 +341,7 @@ v1.<base64url(JSON { type:"anonymous", sub:<uuid-v4> })>.<hmac-sha256 base64url>
 Хранилище: AsyncStorage `'roadradarIdentity'` / ключ `anonymousIdentityToken`.
 
 **Кто требует Bearer:** все методы `RoadEventsController`.
-**Кто не требует:** `POST /identity/anonymous`, `GET /health`, `GET /weather`. Клиент всё равно шлёт Bearer на weather, потому что использует тот же `httpRequest`.
+**Кто не требует:** `POST /identity/anonymous`, `GET /health`.
 
 Socket identity **не** привязан к HTTP-токену.
 
@@ -375,7 +374,6 @@ Base: `http://host:4000/api`.
 | --- | --- | --- | --- | --- |
 | POST | `/identity/anonymous` | нет | — | `{ token }` |
 | GET | `/health` | нет | — | `{ status, service, database, postgis, timestamp }` |
-| GET | `/weather?cityId=` | нет | cityId | CurrentWeather или `null` |
 | GET | `/road-events` | Bearer | cityId, west, south, east, north | массив USER/TELEGRAM/TOMTOM |
 | GET | `/road-events/dps-summary` | Bearer | cityId | `{ cityId, onMap, unlocated, total }` |
 | POST | `/road-events` | Bearer | `{ cityId, type, title?, description?, coordinate:[lng,lat] }` | событие + `viewerRelation: CREATOR` |
@@ -407,7 +405,7 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 - Не ломать bundle id / applicationId / RN name `RoadRadar` / display name OnMap.
 - Координаты API и карты: `[lng, lat]`.
 - `cityId` строкой, не угадывать другие города.
-- Доменные константы TTL/типов: backend `road-events.constants.ts` — источник истины для API. На фронте есть **копия** TTL в `roadEventFreshness.ts` (**не совпадает** для `ROAD_PATROL`: фронт 45 мин, бэкенд 20 мин).
+- TTL и расчёт доверия сохранённых событий определяет backend `road-event-confidence.ts`; mobile отображает `confidencePercent`, `status` и `expiresAt` из API.
 - Слои FSD: фича не должна тащить SQL; API-клиент в `entities/*/api`.
 - Zustand: локальный UI (`useMapUiStore`, фильтр, draft отчёта, выбранный город). Серверное состояние — TanStack Query.
 - Не форматировать чужие файлы «заодно». Backend часто с необычными переносами строк — сохранять стиль файла.
@@ -433,7 +431,6 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 | iOS MapLibre / pods | `pod install`, `$MLRN.post_install`, New Arch включена (`RCTNewArchEnabled`) |
 | Нет Telegram-событий | `TELEGRAM_INGESTION_ENABLED`, session, chat id; runtime status в логах |
 | Нет TomTom | `TOMTOM_API_KEY`; в list ошибка глотается |
-| Нет погоды | `YANDEX_WEATHER_API_KEY`; API возвращает `null` |
 | Realtime молчит, HTTP ок | `REALTIME_ENABLED`, `SOCKET_URL` без `/api`, CORS/сеть |
 | Jest RN падает на native | моки MapLibre; смотреть соседние `*.test.tsx` |
 
@@ -477,11 +474,9 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 **Подтверждено**
 
 - `backend/test/app.e2e-spec.ts` — шаблон Nest, не тестирует API.
-- `mockRoadEventRepository.ts` не используется.
-- TTL `ROAD_PATROL` расходится: фронт 45 мин vs backend 20 мин (`roadEventFreshness.ts` vs `road-events.constants.ts`).
+- Клиентский mock и дублирующая TTL-формула удалены; доверие и завершение меток определяет только backend.
 - Rate limit и `DpsActivityTracker.unlocated` — in-memory, теряются при рестарте/нескольких процессах.
 - Socket.IO без аутентификации: любой клиент может подписаться на город.
-- `GET /weather` без guard при том, что клиент шлёт Bearer.
 - Корневой `README.md` — шаблон RN, не описывает backend/docker.
 - `backend/README.md` — шаблон Nest.
 - Нет CI.
@@ -499,9 +494,8 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 
 - Реальный прод-хостинг, HTTPS, секреты.
 - Поведение MapLibre New Architecture на конкретных версиях Xcode/Android SDK.
-- Актуальность Yandex Weather `v2/informers` и заголовка `X-Yandex-Weather-Key`.
 - Содержимое `backend/src/cities/data/balakovo/imported-locations.json` vs словарь парсера.
-- Нужен ли auth на weather/health в проде.
+- Нужен ли auth на health в проде.
 
 ---
 
@@ -525,7 +519,6 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 | Lifecycle / TTL / ДПС | `road-events.constants.ts`, `RoadEventsService.refreshStatuses`, `dps-activity-tracker.service.ts` |
 | Telegram ingest | `telegram-ingestion-runtime.service.ts`, `telegram-mtproto.client.ts`, `telegram-message.parser.ts`, `telegram-dry-run-ingestion.pipeline.ts`, `telegram-ingestion-persistence.service.ts`, `telegram-location-resolver*` |
 | TomTom | `tomtom-traffic.provider.ts`, `tomtom.mapper.ts`, `listTomTomIncidents` |
-| Погода | `weather.controller.ts`, `weather.service.ts`, `weatherRepository.ts`, `useCurrentWeather.ts` |
 | Онбординг / бренд | `AppLaunchGate.tsx`, `OnboardingScreen.tsx`, `LaunchScreen.tsx`, `PRODUCT.md`, `DESIGN.md` |
 | iOS native / MapLibre | `ios/Podfile`, `ios/RoadRadar/Info.plist`, `ios/.xcode.env` |
 | Android permissions | `android/app/src/main/AndroidManifest.xml`, `android/app/build.gradle` |
