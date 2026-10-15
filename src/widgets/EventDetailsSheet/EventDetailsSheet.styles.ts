@@ -23,7 +23,7 @@ export const styles = StyleSheet.create({
 
     paddingTop: 8,
 
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
 
     paddingBottom: 20,
 
@@ -38,6 +38,18 @@ export const styles = StyleSheet.create({
 
   scrollContent: {
     flexGrow: 0,
+    flexShrink: 1,
+  },
+
+  scrollInner: {
+    paddingBottom: 14,
+  },
+
+  footer: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 10,
+    backgroundColor: colors.surface,
   },
 
   handle: {
@@ -47,7 +59,7 @@ export const styles = StyleSheet.create({
 
     alignSelf: 'center',
 
-    marginBottom: 14,
+    marginBottom: 16,
 
     borderRadius: 2,
 
@@ -66,6 +78,26 @@ export const styles = StyleSheet.create({
 
   headerContent: {
     flex: 1,
+    minWidth: 0,
+  },
+
+  topline: {
+    minHeight: 19,
+    marginBottom: 10,
+    marginRight: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+
+  sourceLabel: {
+    flexShrink: 1,
+    fontSize: 10,
+    lineHeight: 14,
+    letterSpacing: 0.8,
+    fontWeight: '700',
+    color: colors.brandLeaf,
   },
 
   statusRow: {
@@ -75,7 +107,7 @@ export const styles = StyleSheet.create({
 
     gap: 6,
 
-    marginTop: 6,
+    flexShrink: 0,
   },
 
   statusDot: {
@@ -101,7 +133,7 @@ export const styles = StyleSheet.create({
   },
 
   statusText: {
-    fontSize: 12,
+    fontSize: 11,
 
     fontWeight: '600',
 
@@ -134,9 +166,8 @@ export const styles = StyleSheet.create({
 
   title: {
     ...typography.title,
-
     flex: 1,
-
+    minWidth: 0,
     color: colors.textPrimary,
   },
 
@@ -145,19 +176,214 @@ export const styles = StyleSheet.create({
 
     alignItems: 'center',
 
-    gap: 12,
+    gap: 8,
+    minHeight: 64,
   },
 
   titleMarker: {
-    width: 68,
+    width: 62,
 
-    height: 68,
+    height: 62,
 
     alignItems: 'center',
 
     justifyContent: 'center',
 
     overflow: 'visible',
+  },
+
+  eventTime: {
+    minWidth: 72,
+    maxWidth: 89,
+    alignItems: 'flex-end',
+  },
+
+  eventTimeValue: {
+    fontFamily: typography.title.fontFamily,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+
+  eventTimeLabel: {
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'right',
+    color: colors.textSecondary,
+  },
+
+  locationLine: {
+    marginTop: 14,
+    paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+
+  locationMark: {
+    width: 16,
+    height: 16,
+    borderWidth: 1.5,
+    borderColor: colors.brandLeaf,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  locationMarkCenter: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.brandLeaf,
+  },
+
+  locationContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  locationTitle: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+
+  locationDetail: {
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textSecondary,
+  },
+
+  approximationMark: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.warning,
+  },
+
+  communityLine: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingTop: 11,
+  },
+
+  confidencePair: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
+  },
+
+  confidenceValue: {
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: '800',
+    color: colors.brandForest,
+  },
+
+  communityLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+
+  voteCounts: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 9,
+  },
+
+  countValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+
+  lastConfirmed: {
+    marginTop: 7,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textSecondary,
+  },
+
+  sourceMessage: {
+    marginTop: 13,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: '#B7A5C9',
+  },
+
+  sourceMessageHeading: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+
+  sourceMessageLabel: {
+    fontSize: 11,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#786A8B',
+  },
+
+  sourceMessageToggle: {
+    fontSize: 11,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#786A8B',
+  },
+
+  sourceMessageText: {
+    marginTop: 5,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textPrimary,
+  },
+
+  receipt: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+    marginTop: 15,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+
+  receiptMark: {
+    fontSize: 16,
+    lineHeight: 19,
+    fontWeight: '700',
+    color: colors.success,
+  },
+
+  receiptContent: {flex: 1},
+
+  receiptTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+
+  receiptDescription: {
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textSecondary,
+  },
+
+  inactiveNote: {
+    marginTop: 13,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
   },
 
   dpsSubtitle: {

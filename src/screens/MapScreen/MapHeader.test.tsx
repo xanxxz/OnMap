@@ -153,6 +153,60 @@ describe('MapHeader', () => {
     expect(text).toContain('2 на карте\n1 без точки');
   });
 
+  it('does not claim road conditions are calm before events load successfully', () => {
+    act(() => {
+      renderer = create(
+        <MapHeader
+          city={balakovoCity}
+          cities={[balakovoCity]}
+          dpsActivity={null}
+          dpsActivityLoading
+          eventCount={0}
+          eventsStatus="loading"
+          realtimeStatus="connected"
+          onSelectCity={jest.fn()}
+        />,
+      );
+    });
+
+    const text = renderer.root
+      .findAllByType(require('react-native').Text)
+      .map(node => node.props.children)
+      .join(' ');
+
+    expect(text).toContain('Загружаем обстановку');
+    expect(text).not.toContain('Дорожная обстановка спокойная');
+    expect(text).toContain('загружаем');
+  });
+
+  it('shows a recoverable error for events and DPS when requests fail', () => {
+    const retryDps = jest.fn();
+    act(() => {
+      renderer = create(
+        <MapHeader
+          city={balakovoCity}
+          cities={[balakovoCity]}
+          dpsActivity={null}
+          dpsActivityError
+          eventCount={0}
+          eventsStatus="error"
+          realtimeStatus="connected"
+          onRetryDpsActivity={retryDps}
+          onSelectCity={jest.fn()}
+        />,
+      );
+    });
+
+    const text = renderer.root
+      .findAllByType(require('react-native').Text)
+      .map(node => node.props.children)
+      .join(' ');
+    expect(text).toContain('Не удалось загрузить обстановку');
+    expect(text).not.toContain('Дорожная обстановка спокойная');
+    act(() => renderer.root.findByProps({testID: 'dps-summary-retry'}).props.onPress());
+    expect(retryDps).toHaveBeenCalledTimes(1);
+  });
+
   it('shows no partner block without a backend banner and opens the provided banner URL', async () => {
     const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
     const onBannerPress = jest.fn();
@@ -174,6 +228,7 @@ describe('MapHeader', () => {
       startsAt: '', endsAt: '',
     }} />));
     expect(renderer.root.findAllByType(View).filter(node => node.props.testID === 'partner-banner')).toHaveLength(1);
+    act(() => renderer.root.findByProps({testID: 'partner-banner-expand'}).props.onPress());
     await act(async () => {
       renderer.root.findByProps({accessibilityLabel: 'Подробнее'}).props.onPress();
     });
@@ -192,8 +247,13 @@ describe('MapHeader', () => {
         appearance: {backgroundColor: '#F7F4EA', textColor: '#14241E'}}}
     />); });
     const banner = renderer.root.findByProps({testID: 'partner-banner'});
-    expect(StyleSheet.flatten(banner.props.style).backgroundColor).toBe('#F7F4EA');
-    expect(StyleSheet.flatten(renderer.root.findByProps({children: 'Мастерская рядом'}).props.style).color).toBe('#14241E');
+    expect(StyleSheet.flatten(banner.props.style).backgroundColor).not.toBe('#F7F4EA');
+    expect(StyleSheet.flatten(renderer.root.findByProps({children: 'Открыть'}).props.style).color).toBe('#153D32');
+    act(() => renderer.root.findByProps({testID: 'partner-banner-expand'}).props.onPress());
+    const action = renderer.root.findByProps({testID: 'partner-banner-action'});
+    expect(StyleSheet.flatten(action.props.style({pressed: false}))).toMatchObject({backgroundColor: '#153D32', minHeight: 44});
+    expect(StyleSheet.flatten(action.findAllByType(require('react-native').Text)[0].props.style).color).toBe('#FDFBF4');
+    expect(StyleSheet.flatten(action.props.style({pressed: true})).opacity).toBeLessThan(1);
   });
 
   it('counts an impression only after one second of laid-out, active visibility, not on rerender', () => {

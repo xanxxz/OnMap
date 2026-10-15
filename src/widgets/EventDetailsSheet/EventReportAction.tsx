@@ -4,6 +4,7 @@ import { BlurView } from '@sbaiahmed1/react-native-blur';
 
 import type { RoadEvent } from '../../entities/road-event/model/roadEvent';
 import { useRoadEventReport } from '../../features/road-event-feedback/model/useRoadEventReport';
+import { ApiError } from '../../shared/api/httpClient';
 import { EVENT_REPORT_REASONS, EventReportReason } from './eventReport';
 import { reportStyles } from './EventReportAction.styles';
 
@@ -17,6 +18,14 @@ export const EventReportAction = ({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<EventReportReason | null>(null);
   const report = useRoadEventReport();
+  const failureMessage =
+    report.error instanceof ApiError && report.error.status === 409
+      ? 'На свою метку пожаловаться нельзя.'
+      : report.error instanceof ApiError && report.error.status === 410
+        ? 'Событие уже завершено или недоступно для жалобы.'
+        : report.error instanceof ApiError && report.error.status === 429
+          ? 'Слишком много жалоб за последний час. Попробуйте позже.'
+          : 'Не удалось отправить жалобу. Проверьте подключение и попробуйте ещё раз.';
 
   const close = () => {
     setOpen(false);
@@ -40,7 +49,8 @@ export const EventReportAction = ({
           pressed && reportStyles.pressed,
         ]}
       >
-        <Text style={reportStyles.triggerText}>Пожаловаться</Text>
+        <Text style={reportStyles.triggerText}>Пожаловаться на событие</Text>
+        <Text style={reportStyles.triggerArrow} accessibilityElementsHidden>›</Text>
       </Pressable>
 
       <Modal
@@ -91,8 +101,7 @@ export const EventReportAction = ({
                   </Text>
                 ) : (
                   <Text style={reportStyles.errorText}>
-                    Не удалось отправить жалобу. Проверьте подключение и
-                    попробуйте ещё раз.
+                    {failureMessage}
                   </Text>
                 )}
               </>

@@ -4,7 +4,7 @@ import { AppState, Linking, Modal, Pressable, Text, View } from 'react-native';
 
 import type { DpsActivitySummary } from '../../entities/road-event/api/roadEventRepository';
 import type { PartnerBanner } from '../../entities/partner-placement/model/partnerPlacement';
-import { getPartnerAppearance } from '../../entities/partner-placement/lib/partnerAppearance';
+import {getPartnerAccentColor, getPartnerAccentTextColor, getPartnerAppearance} from '../../entities/partner-placement/lib/partnerAppearance';
 import type { CityConfig } from '../../shared/config/cities';
 import type { RealtimeStatus } from '../../entities/road-event/model/useRoadEventRealtime';
 import { BottomSheet } from '../../shared/ui/BottomSheet/BottomSheet';
@@ -17,7 +17,10 @@ interface MapHeaderProps {
   cities: readonly CityConfig[];
   dpsActivity: DpsActivitySummary | null | undefined;
   dpsActivityLoading?: boolean;
+  dpsActivityError?: boolean;
+  onRetryDpsActivity?: () => void;
   eventCount: number;
+  eventsStatus?: 'loading' | 'error' | 'success';
   realtimeStatus: RealtimeStatus;
   partnerBanner?: PartnerBanner | null;
   partnerBannerVisible?: boolean;
@@ -29,7 +32,10 @@ interface MapHeaderProps {
 const formatEventStatus = (
   eventCount: number,
   realtimeStatus: RealtimeStatus,
+  eventsStatus: 'loading' | 'error' | 'success',
 ): string => {
+  if (eventsStatus === 'loading') return 'Загружаем обстановку';
+  if (eventsStatus === 'error') return 'Не удалось загрузить обстановку';
   if (realtimeStatus === 'disconnected')
     return 'Обновления могут задерживаться';
   if (realtimeStatus === 'connecting') return 'Обновляем дорожную обстановку';
@@ -44,7 +50,10 @@ export const MapHeader = ({
   cities,
   dpsActivity,
   dpsActivityLoading = false,
+  dpsActivityError = false,
+  onRetryDpsActivity,
   eventCount,
+  eventsStatus = 'success',
   realtimeStatus,
   partnerBanner,
   partnerBannerVisible = true,
@@ -57,6 +66,7 @@ export const MapHeader = ({
   const [supportOpenFailed, setSupportOpenFailed] = useState(false);
   const [bannerOpenFailed, setBannerOpenFailed] = useState(false);
   const [bannerLaidOut, setBannerLaidOut] = useState(false);
+  const [bannerExpanded, setBannerExpanded] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const countedBanners = useRef(new Set<string>());
   const impressionCallback = useRef(onPartnerBannerImpression);
@@ -67,6 +77,7 @@ export const MapHeader = ({
   }, []);
   useEffect(() => {
     setBannerLaidOut(false);
+    setBannerExpanded(false);
   }, [partnerBanner?.id]);
   useEffect(() => {
     const id = partnerBanner?.id;
@@ -80,10 +91,12 @@ export const MapHeader = ({
   const closeSelector = useCallback(() => setSelectorVisible(false), []);
   const selectorClosed = useCallback(() => setSelectorMounted(false), []);
   const status = useMemo(
-    () => formatEventStatus(eventCount, realtimeStatus),
-    [eventCount, realtimeStatus],
+    () => formatEventStatus(eventCount, realtimeStatus, eventsStatus),
+    [eventCount, eventsStatus, realtimeStatus],
   );
   const bannerAppearance = getPartnerAppearance(partnerBanner?.appearance);
+  const bannerAccentColor = getPartnerAccentColor(bannerAppearance);
+  const bannerAccentTextColor = getPartnerAccentTextColor(bannerAppearance, bannerAccentColor);
 
   return (
     <>
@@ -120,7 +133,7 @@ export const MapHeader = ({
             <View
               style={[
                 headerStyles.statusDot,
-                realtimeStatus === 'disconnected' &&
+                (realtimeStatus === 'disconnected' || eventsStatus !== 'success') &&
                   headerStyles.statusDotDelayed,
               ]}
             />
@@ -137,41 +150,67 @@ export const MapHeader = ({
         >
           <Text style={headerStyles.dpsLabel}>ДПС</Text>
           <Text style={headerStyles.dpsTotal}>
-            {dpsActivityLoading && !dpsActivity ? '—' : dpsActivity?.total ?? 0}
+            {dpsActivity?.total ?? '—'}
           </Text>
-          <Text style={headerStyles.dpsBreakdown}>
+          {dpsActivityError && !dpsActivity ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Повторить загрузку сводки ДПС"
+              disabled={dpsActivityLoading}
+              onPress={onRetryDpsActivity}
+              testID="dps-summary-retry"
+            >
+              <Text style={headerStyles.dpsBreakdown}>
+                {dpsActivityLoading ? 'загружаем' : 'повторить'}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text style={headerStyles.dpsBreakdown}>
             {dpsActivity
               ? `${dpsActivity.onMap} на карте\n${dpsActivity.unlocated} без точки`
-              : 'считаем'}
-          </Text>
+              : dpsActivityLoading ? 'загружаем' : 'нет данных'}
+            </Text>
+          )}
         </View>
       </View>
 
       {partnerBanner ? (
-        <View testID="partner-banner" onLayout={event => setBannerLaidOut(event.nativeEvent.layout.width > 0 && event.nativeEvent.layout.height > 0)} style={[headerStyles.partnerBanner, {backgroundColor: bannerAppearance.backgroundColor}]}>
-          <Text numberOfLines={2} style={[headerStyles.partnerBannerTitle, {color: bannerAppearance.textColor}]}>{partnerBanner.title}</Text>
-          <Text numberOfLines={2} style={[headerStyles.partnerBannerDescription, {color: bannerAppearance.textColor}]}>{partnerBanner.text}</Text>
+        <View testID="partner-banner" onLayout={event => setBannerLaidOut(event.nativeEvent.layout.width > 0 && event.nativeEvent.layout.height > 0)} style={headerStyles.partnerBanner}>
+          <View style={[headerStyles.partnerBannerAccent, {backgroundColor: bannerAccentColor}]} />
           <Pressable
-            accessibilityRole="link"
-            accessibilityLabel={partnerBanner.button.label}
-            onPress={() => {
-              onPartnerBannerPress?.(partnerBanner.id);
-              Linking.openURL(partnerBanner.button.url).catch(() =>
-                setBannerOpenFailed(true),
-              );
-            }}
-            style={({ pressed }) => [
-              headerStyles.partnerBannerButton,
-              pressed && headerStyles.partnerBannerButtonPressed,
-            ]}
+            testID="partner-banner-expand"
+            accessibilityRole="button"
+            accessibilityState={{expanded: bannerExpanded}}
+            accessibilityLabel={`Предложение партнёра: ${partnerBanner.title}`}
+            onPress={() => setBannerExpanded(open => !open)}
+            style={({pressed}) => [headerStyles.partnerBannerSummary, pressed && headerStyles.partnerBannerButtonPressed]}
           >
-            <Text numberOfLines={1} style={[headerStyles.partnerBannerButtonText, {color: bannerAppearance.textColor}]}>
-              {partnerBanner.button.label}
-            </Text>
-            <View style={[headerStyles.partnerBannerArrow, {borderColor: bannerAppearance.textColor}]} accessible={false}>
-              <View style={[headerStyles.partnerBannerArrowHead, {borderColor: bannerAppearance.textColor}]} />
+            <View style={[headerStyles.partnerBannerMark, {borderColor: bannerAccentColor}]}><Text style={[headerStyles.partnerBannerMarkText, {color: bannerAccentColor}]}>П</Text></View>
+            <View style={headerStyles.partnerBannerCopy}>
+              <Text style={headerStyles.partnerBannerKicker}>ПАРТНЁР РЯДОМ</Text>
+              <Text numberOfLines={1} style={headerStyles.partnerBannerTitle}>{partnerBanner.title}</Text>
+              {!bannerExpanded ? <Text numberOfLines={1} style={headerStyles.partnerBannerDescription}>{partnerBanner.text}</Text> : null}
             </View>
+            <Text style={[headerStyles.partnerBannerExpandLabel, {color: bannerAccentColor}]}>{bannerExpanded ? 'Свернуть' : 'Открыть'}</Text>
           </Pressable>
+          {bannerExpanded ? (
+            <View style={headerStyles.partnerBannerDetails}>
+              <Text style={headerStyles.partnerBannerFullText}>{partnerBanner.text}</Text>
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel={partnerBanner.button.label}
+                onPress={() => {
+                  onPartnerBannerPress?.(partnerBanner.id);
+                  Linking.openURL(partnerBanner.button.url).catch(() => setBannerOpenFailed(true));
+                }}
+                testID="partner-banner-action"
+                style={({pressed}) => [headerStyles.partnerBannerButton, {backgroundColor: bannerAccentColor, borderColor: bannerAccentColor}, pressed && headerStyles.partnerBannerButtonPressed]}
+              >
+                <Text numberOfLines={1} style={[headerStyles.partnerBannerButtonText, {color: bannerAccentTextColor}]}>{partnerBanner.button.label}</Text>
+                <Text style={[headerStyles.partnerBannerLinkArrow, {color: bannerAccentTextColor}]}>↗</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       ) : null}
       {partnerBanner && bannerOpenFailed ? (

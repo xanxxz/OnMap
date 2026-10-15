@@ -23,6 +23,8 @@ import {
 
 import {
   ApiError,
+  ApiTimeoutError,
+  API_REQUEST_TIMEOUT_MS,
   httpRequest,
 } from './httpClient';
 
@@ -63,6 +65,7 @@ describe('identity-aware HTTP client', () => {
   });
 
   beforeEach(async () => {
+    jest.useRealTimers();
     await clearAnonymousIdentityToken();
     jest.clearAllMocks();
   });
@@ -100,6 +103,19 @@ describe('identity-aware HTTP client', () => {
       'anonymousIdentityToken',
       'new-token',
     );
+  });
+
+  it('reports safe observer stages after identity is ready and before the request', async () => {
+    mockStorage.getItem.mockResolvedValue('stored-token');
+    mockFetch.mockResolvedValue(createResponse(200, { success: true }));
+    const stages: string[] = [];
+
+    await httpRequest('/push/devices', { method: 'POST' }, {
+      onIdentityReady: () => stages.push('identity-ready'),
+      onRequestStarted: () => stages.push('request-started'),
+    });
+
+    expect(stages).toEqual(['identity-ready', 'request-started']);
   });
 
   it('issues only one identity for concurrent requests', async () => {
@@ -163,5 +179,21 @@ describe('identity-aware HTTP client', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(3);
     expect(mockStorage.removeItem).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts a stalled request after the bounded API timeout', async () => {
+    jest.useFakeTimers();
+    mockStorage.getItem.mockResolvedValue('stored-token');
+    mockFetch.mockImplementation((_input, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+
+    const request = httpRequest('/road-events');
+    const rejection = request.then(
+      () => { throw new Error('Expected the request to time out.'); },
+      error => { expect(error).toBeInstanceOf(ApiTimeoutError); },
+    );
+    await jest.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MS);
+    await rejection;
   });
 });

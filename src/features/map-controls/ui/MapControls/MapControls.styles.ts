@@ -170,4 +170,53 @@ export const styles = StyleSheet.create({
 
     backgroundColor: colors.primary,
   },
+  pairingBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    backgroundColor: 'rgba(12, 30, 24, 0.42)',
+  },
+  pairingCard: {
+    padding: 22,
+    borderRadius: radius[14],
+    backgroundColor: colors.surfaceGlass,
+    gap: 14,
+  },
+  pairingTitle: {
+    color: colors.textPrimary,
+    fontSize: 21,
+    fontWeight: '700',
+  },
+  pairingHint: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  pairingInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius[14],
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: colors.textPrimary,
+    fontSize: 18,
+    letterSpacing: 1,
+  },
+  pairingActions: {
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'flex-end',
+  },
+  pairingSecondary: {
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  pairingSecondaryText: { color: colors.textSecondary, fontSize: 15 },
+  pairingPrimary: {
+    paddingHorizontal: 17,
+    paddingVertical: 10,
+    borderRadius: radius[14],
+    backgroundColor: colors.primary,
+  },
+  pairingPrimaryText: { color: colors.surfaceGlass, fontSize: 15, fontWeight: '600' },
 });

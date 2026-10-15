@@ -44,6 +44,21 @@ export class ApiError
   }
 }
 
+export class ApiTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`API request timed out after ${timeoutMs} ms`);
+    this.name = 'ApiTimeoutError';
+  }
+}
+
+export const API_REQUEST_TIMEOUT_MS = 12_000;
+
+export interface HttpRequestObserver {
+  onIdentityReady?: () => void;
+  onRequestStarted?: () => void;
+  onIdentityError?: () => void;
+}
+
 const createUrl = (
   path: string,
 ): string => {
@@ -148,48 +163,47 @@ const performHttpRequest =
       );
     }
 
-    let response: Response;
-
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, API_REQUEST_TIMEOUT_MS);
+    const abortFromCaller = () => controller.abort();
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
     try {
-      response =
-        await fetch(
-          createUrl(path),
-          {
-            ...options,
-
-            headers,
-          },
+      const response = await fetch(createUrl(path), {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+      const body = await parseResponseBody(response);
+      if (!response.ok) {
+        throw new ApiError(
+          getErrorMessage(body, response.status),
+          response.status,
+          body,
         );
+      }
+      return body as T;
     } catch (error) {
+      if (timedOut) {
+        throw new ApiTimeoutError(API_REQUEST_TIMEOUT_MS);
+      }
+      if (error instanceof ApiError) {
+        throw error;
+      }
       const message =
         error instanceof Error
           ? error.message
           : 'Unknown network error';
-
       throw new Error(
         `Network request failed: ${message}`,
       );
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortFromCaller);
     }
-
-    const body =
-      await parseResponseBody(
-        response,
-      );
-
-    if (!response.ok) {
-      throw new ApiError(
-        getErrorMessage(
-          body,
-          response.status,
-        ),
-
-        response.status,
-
-        body,
-      );
-    }
-
-    return body as T;
   };
 
 const issueAnonymousIdentity =
@@ -253,13 +267,21 @@ export const httpRequest =
     path: string,
     options:
       RequestInit = {},
+    observer?: HttpRequestObserver,
   ): Promise<T> => {
-    const token =
-      await getAnonymousIdentityToken(
+    let token: string;
+    try {
+      token = await getAnonymousIdentityToken(
         issueAnonymousIdentity,
       );
+      observer?.onIdentityReady?.();
+    } catch (error) {
+      observer?.onIdentityError?.();
+      throw error;
+    }
 
     try {
+      observer?.onRequestStarted?.();
       return await performHttpRequest<T>(
         path,
         withAuthorization(
@@ -273,12 +295,19 @@ export const httpRequest =
       }
     }
 
-    const refreshedToken =
-      await refreshAnonymousIdentityToken(
+    let refreshedToken: string;
+    try {
+      refreshedToken = await refreshAnonymousIdentityToken(
         issueAnonymousIdentity,
       );
+      observer?.onIdentityReady?.();
+    } catch (error) {
+      observer?.onIdentityError?.();
+      throw error;
+    }
 
     try {
+      observer?.onRequestStarted?.();
       return await performHttpRequest<T>(
         path,
         withAuthorization(

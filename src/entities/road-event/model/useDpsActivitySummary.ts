@@ -11,5 +11,6 @@ export const useDpsActivitySummary = (cityId: string) =>
     queryFn: () => roadEventRepository.getDpsActivitySummary(cityId),
     staleTime: 15_000,
     refetchInterval: 30_000,
-    retry: 2,
+    retry: 1,
+    retryDelay: 1_000,
   });

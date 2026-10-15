@@ -4,16 +4,22 @@ import { colors, radius, typography } from '../../shared/theme';
 
 export const reportStyles = StyleSheet.create({
   trigger: {
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
     minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
   triggerText: {
     ...typography.caption,
+    flex: 1,
     color: colors.textSecondary,
-    textDecorationLine: 'underline',
+  },
+  triggerArrow: {
+    fontSize: 20,
+    lineHeight: 24,
+    color: colors.textSecondary,
   },
   pressed: { opacity: 0.7 },
   overlay: {

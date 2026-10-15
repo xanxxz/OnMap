@@ -225,6 +225,8 @@ export const MapScreen = () => {
 
     isPending: eventsPending,
 
+    isPlaceholderData: eventsPlaceholderData,
+
     isError: eventsError,
 
     refetch: refetchEvents,
@@ -294,6 +296,9 @@ export const MapScreen = () => {
   const {
     data: dpsActivity,
     isPending: dpsActivityLoading,
+    isFetching: dpsActivityFetching,
+    isError: dpsActivityError,
+    refetch: refetchDpsActivity,
   } = useDpsActivitySummary(city.id);
 
   const availableCities = useMemo(() => getAvailableCities(), []);
@@ -589,11 +594,29 @@ export const MapScreen = () => {
     roadMapRef.current?.focusCoordinate(userCoordinate);
   };
 
-  const handleOpenLocationSettings = () => {
+  const handleRetryLocate = async () => {
+    const result = await requestFreshUserLocation('granted');
+    if (result.status !== 'READY' && result.status !== 'APPROXIMATE') return false;
+    roadMapRef.current?.focusCoordinate(result.coordinate);
+    return true;
+  };
+
+  const handleContinueWithoutGps = () => {
+    createRoadEvent.reset();
+    clearSelectedEvent();
+    setSelectedPartnerPointId(null);
+    openForLocationLookup();
+    setLocationFailure('UNAVAILABLE');
+  };
+
+  const handleOpenLocationSettings = async () => {
     locationSettingsRefreshPending.current = true;
-    Linking.openSettings().catch(() => {
+    try {
+      await Linking.openSettings();
+    } catch (error) {
       locationSettingsRefreshPending.current = false;
-    });
+      throw error;
+    }
   };
 
   const handleFeedback = (action: RoadEventFeedbackAction) => {
@@ -797,8 +820,17 @@ export const MapScreen = () => {
           city={city}
           cities={availableCities}
           dpsActivity={dpsActivity}
-          dpsActivityLoading={dpsActivityLoading}
+          dpsActivityLoading={dpsActivityFetching || dpsActivityLoading}
+          dpsActivityError={dpsActivityError}
+          onRetryDpsActivity={() => { refetchDpsActivity(); }}
           eventCount={events.length}
+          eventsStatus={
+            mapDataStatus === 'error'
+              ? 'error'
+              : mapDataStatus === 'loading' || eventsPlaceholderData
+                ? 'loading'
+                : 'success'
+          }
           realtimeStatus={realtimeStatus}
           partnerBanner={partnerPlacements?.banner ?? null}
           partnerBannerVisible={screenIsFocused && !selectedPartnerPointId && !selectedEventId && !reportOpen}
@@ -864,12 +896,18 @@ export const MapScreen = () => {
           locationPermission={locationPermission}
           onOpenLocationSettings={handleOpenLocationSettings}
           onRequestLocation={async () => {
-            await requestLocationPermission();
+            const granted = await requestLocationPermission();
             await refreshLocationPermission();
+            return granted;
           }}
+          onRetryLocation={handleRetryLocate}
+          onContinueManually={handleContinueWithoutGps}
+          locationUnavailable={userLocationUnavailable}
           locationMessage={
-            locationPermission === 'denied'
-              ? 'Геолокация выключена. Точку события можно поставить вручную.'
+            locationPermission === 'denied' || locationPermission === 'blocked'
+              ? 'Доступ к геопозиции выключен. Точку события можно поставить вручную.'
+              : locationPermission === 'unavailable'
+              ? 'Служба геолокации недоступна. Точку события можно поставить вручную.'
               : userLocationUnavailable
               ? 'Не удалось определить место. Проверьте точную геопозицию в настройках или поставьте точку вручную.'
               : null

@@ -1,10 +1,10 @@
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {LocationManager} from '@maplibre/maplibre-react-native';
-import {check, RESULTS} from 'react-native-permissions';
+import {check, PERMISSIONS, requestMultiple, RESULTS} from 'react-native-permissions';
 import {act, create, ReactTestRenderer} from 'react-test-renderer';
-import {PermissionsAndroid, Platform, Text} from 'react-native';
-import {requestLocationPermission, useLocationPermission} from './useLocationPermission';
+import {Platform, Text} from 'react-native';
+import {getLocationPermissionState, requestLocationPermission, useLocationPermission} from './useLocationPermission';
 
 const Probe = () => {
   const {permission} = useLocationPermission();
@@ -43,16 +43,15 @@ describe('location permission after onboarding', () => {
 
   it('uses Android permission API instead of the MapLibre no-op', async () => {
     Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
-    jest.spyOn(PermissionsAndroid, 'check').mockResolvedValue(false);
-    const androidResults = {
-      [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION]: PermissionsAndroid.RESULTS.DENIED,
-      [PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION]: PermissionsAndroid.RESULTS.GRANTED,
-    } as unknown as Awaited<ReturnType<typeof PermissionsAndroid.requestMultiple>>;
-    const requestMultiple = jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue(androidResults);
+    jest.mocked(check).mockResolvedValue(RESULTS.DENIED);
+    jest.mocked(requestMultiple).mockResolvedValue({
+      [PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION]: RESULTS.DENIED,
+      [PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION]: RESULTS.GRANTED,
+    } as Awaited<ReturnType<typeof requestMultiple>>);
     expect(await requestLocationPermission()).toBe(true);
     expect(requestMultiple).toHaveBeenCalledWith([
-      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+      PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+      PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
     ]);
     expect(LocationManager.requestPermissions).not.toHaveBeenCalled();
   });
@@ -68,7 +67,30 @@ describe('location permission after onboarding', () => {
     await AsyncStorage.setItem('onmap:location-permission-requested:v1', 'true');
     jest.mocked(check).mockResolvedValue(RESULTS.DENIED);
     await act(async () => { renderer = create(<Probe />); });
-    expect(renderer.root.findByType(Text).props.children).toBe('denied');
+    expect(renderer.root.findByType(Text).props.children).toBe('blocked');
     expect(LocationManager.requestPermissions).not.toHaveBeenCalled();
+  });
+
+  it('keeps an Android permission retryable while the OS allows another request', async () => {
+    Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
+    await AsyncStorage.setItem('onmap:location-permission-requested:v1', 'true');
+    jest.mocked(check).mockResolvedValue(RESULTS.DENIED);
+    expect(await getLocationPermissionState()).toBe('denied');
+  });
+
+  it('stores a blocked Android request so the next tap can offer settings instead of looping', async () => {
+    Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
+    jest.mocked(check).mockResolvedValue(RESULTS.DENIED);
+    jest.mocked(requestMultiple).mockResolvedValue({
+      [PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION]: RESULTS.BLOCKED,
+      [PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION]: RESULTS.BLOCKED,
+    } as Awaited<ReturnType<typeof requestMultiple>>);
+    await expect(requestLocationPermission()).resolves.toBe(false);
+    await expect(getLocationPermissionState()).resolves.toBe('blocked');
+  });
+
+  it('reports system/service unavailability distinctly from a user denial', async () => {
+    jest.mocked(check).mockResolvedValue(RESULTS.UNAVAILABLE);
+    expect(await getLocationPermissionState()).toBe('unavailable');
   });
 });

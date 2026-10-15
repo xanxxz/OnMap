@@ -84,7 +84,9 @@ export const useRoadEvents = (
     refetchIntervalInBackground:
       false,
 
-    retry: 2,
+    retry: 1,
+
+    retryDelay: 1_000,
 
     placeholderData:
       previousData =>

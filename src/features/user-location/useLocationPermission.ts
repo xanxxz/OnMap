@@ -4,9 +4,9 @@ import {
   useState,
 } from 'react';
 
-import {PermissionsAndroid, Platform} from 'react-native';
+import {Platform} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {check, PERMISSIONS, RESULTS} from 'react-native-permissions';
+import {check, PERMISSIONS, requestMultiple, RESULTS} from 'react-native-permissions';
 
 import {
   LocationManager,
@@ -16,30 +16,41 @@ export type LocationPermissionState =
   | 'loading'
   | 'granted'
   | 'notDetermined'
-  | 'denied';
+  | 'denied'
+  | 'blocked'
+  | 'unavailable';
 
 const LOCATION_REQUESTED_KEY = 'onmap:location-permission-requested:v1';
+const LOCATION_BLOCKED_KEY = 'onmap:location-permission-blocked:v1';
 let permissionRequestInFlight: Promise<boolean> | null = null;
 
 export const requestLocationPermission = (): Promise<boolean> => {
   if (!permissionRequestInFlight) {
     permissionRequestInFlight = (async () => {
-      const current = await checkLocationPermission();
+      const current = await getLocationPermissionState();
       if (current === 'granted') return true;
-      if (current === 'denied') return false;
+      if (current === 'blocked' || current === 'unavailable' || current === 'loading') return false;
 
       await AsyncStorage.setItem(LOCATION_REQUESTED_KEY, 'true').catch(() => undefined);
       if (Platform.OS === 'android') {
-        const results = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+        const results = await requestMultiple([
+          PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+          PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
         ]);
-        return [
-          results[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION],
-          results[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION],
-        ].some(result => result === PermissionsAndroid.RESULTS.GRANTED);
+        const statuses = [
+          results[PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION],
+          results[PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION],
+        ];
+        const granted = statuses.some(result => result === RESULTS.GRANTED);
+        if (statuses.some(result => result === RESULTS.BLOCKED)) {
+          await AsyncStorage.setItem(LOCATION_BLOCKED_KEY, 'true').catch(() => undefined);
+        }
+        return granted;
       }
-      return LocationManager.requestPermissions();
+      await LocationManager.requestPermissions();
+      // MapLibre's iOS method resolves once the OS request was issued, not when
+      // Core Location actually granted access. Always re-read the OS status.
+      return (await getLocationPermissionState()) === 'granted';
     })().finally(() => {
       permissionRequestInFlight = null;
     });
@@ -48,23 +59,31 @@ export const requestLocationPermission = (): Promise<boolean> => {
   return permissionRequestInFlight;
 };
 
-const checkLocationPermission = async (): Promise<LocationPermissionState> => {
+export const getLocationPermissionState = async (): Promise<LocationPermissionState> => {
   try {
     if (Platform.OS === 'android') {
-      const [fine, coarse] = await Promise.all([
-        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION),
-        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION),
+      const results = await Promise.all([
+        check(PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION),
+        check(PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION),
       ]);
-      if (fine || coarse) return 'granted';
+      if (results.some(result => result === RESULTS.GRANTED || result === RESULTS.LIMITED)) return 'granted';
+      const requested = await AsyncStorage.getItem(LOCATION_REQUESTED_KEY);
+      if (requested !== 'true') return 'notDetermined';
+      const blocked = await AsyncStorage.getItem(LOCATION_BLOCKED_KEY);
+      return blocked === 'true' ? 'blocked' : 'denied';
     } else {
       const result = await check(PERMISSIONS.IOS.LOCATION_WHEN_IN_USE);
       if (result === RESULTS.GRANTED || result === RESULTS.LIMITED) return 'granted';
-      if (result === RESULTS.BLOCKED || result === RESULTS.UNAVAILABLE) return 'denied';
+      if (result === RESULTS.UNAVAILABLE) return 'unavailable';
+      if (result === RESULTS.BLOCKED) return 'blocked';
+      if (result === RESULTS.DENIED) {
+        const requested = await AsyncStorage.getItem(LOCATION_REQUESTED_KEY);
+        return requested === 'true' ? 'blocked' : 'notDetermined';
+      }
     }
-    const requested = await AsyncStorage.getItem(LOCATION_REQUESTED_KEY);
-    return requested === 'true' ? 'denied' : 'notDetermined';
+    return 'unavailable';
   } catch {
-    return 'denied';
+    return 'unavailable';
   }
 };
 
@@ -83,7 +102,7 @@ export const useLocationPermission =
 
       const request = async () => {
         try {
-          const status = await checkLocationPermission();
+          const status = await getLocationPermissionState();
 
           if (!mounted) {
             return;
@@ -92,7 +111,7 @@ export const useLocationPermission =
           setState(status);
         } catch {
           if (mounted) {
-            setState('denied');
+            setState('unavailable');
           }
         }
       };
@@ -106,9 +125,9 @@ export const useLocationPermission =
 
     const refreshAfterSettings = useCallback(async () => {
       try {
-        setState(await checkLocationPermission());
+        setState(await getLocationPermissionState());
       } catch {
-        setState('denied');
+        setState('unavailable');
       }
     }, []);
 

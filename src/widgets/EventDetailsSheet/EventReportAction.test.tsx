@@ -5,6 +5,7 @@ import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import type { UserRoadEvent } from '../../entities/road-event/model/roadEvent';
 
 import { EventReportAction } from './EventReportAction';
+import {ApiError} from '../../shared/api/httpClient';
 
 const mockReportMutation = {
   mutate: jest.fn(),
@@ -12,6 +13,7 @@ const mockReportMutation = {
   isPending: false,
   isSuccess: false,
   isError: false,
+  error: null as Error | null,
   data: undefined as undefined | { duplicate: boolean },
 };
 
@@ -50,6 +52,7 @@ describe('EventReportAction', () => {
     mockReportMutation.isPending = false;
     mockReportMutation.isSuccess = false;
     mockReportMutation.isError = false;
+    mockReportMutation.error = null;
     mockReportMutation.data = undefined;
   });
 
@@ -103,6 +106,16 @@ describe('EventReportAction', () => {
     act(() => renderer.update(<EventReportAction event={event} bottomInset={34} />));
     expect(renderer.root.findAllByType(Text).some(node =>
       String(node.props.children).includes('Не удалось отправить жалобу'),
+    )).toBe(true);
+  });
+
+  it('explains the own-event conflict instead of calling it a network error', () => {
+    openDraft();
+    mockReportMutation.isError = true;
+    mockReportMutation.error = new ApiError('Creators cannot report their own event', 409, null);
+    act(() => renderer.update(<EventReportAction event={event} bottomInset={34} />));
+    expect(renderer.root.findAllByType(Text).some(node =>
+      String(node.props.children).includes('На свою метку пожаловаться нельзя'),
     )).toBe(true);
   });
 });

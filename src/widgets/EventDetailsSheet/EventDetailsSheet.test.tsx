@@ -142,9 +142,10 @@ describe('EventDetails feedback pending guard', () => {
       );
     });
 
-    expect(
-      renderer.root.findByProps({ testID: 'user-event-details' }),
-    ).toBeDefined();
+    const sheet = renderer.root.findAll(node =>
+      node.props.testID === 'user-event-details' && node.props.style,
+    )[0];
+    expect(StyleSheet.flatten(sheet.props.style).paddingBottom).toBe(46);
     const style = StyleSheet.flatten(sheetStyles.container);
 
     expect(style.left).toBe(0);
@@ -354,6 +355,72 @@ describe('EventDetails feedback pending guard', () => {
     expect(renderer.root.findByProps({
       accessibilityLabel: 'Пожаловаться на событие',
     })).toBeDefined();
+    const footer = renderer.root.findByProps({testID: 'event-sheet-footer'});
+    expect(footer.findAllByProps({accessibilityLabel: 'Подтвердить актуальность события'}).length).toBeGreaterThan(0);
+    expect(footer.findAllByProps({accessibilityLabel: 'Пожаловаться на событие'}).length).toBeGreaterThan(0);
+    expect(renderer.root.findByType(ScrollView).findAllByProps({accessibilityLabel: 'Пожаловаться на событие'})).toHaveLength(0);
+  });
+
+  it.each([
+    ['CONFIRM', 'Вы подтвердили актуальность'],
+    ['REJECT', 'Вы отметили, что события уже нет'],
+  ] as const)('shows a saved %s vote without voting again', (relation, receipt) => {
+    act(() => {
+      renderer = create(<EventDetailsSheet
+        event={{...event, viewerRelation: relation}}
+        isSubmitting={false}
+        onFeedback={jest.fn()}
+        onClose={jest.fn()}
+      />);
+    });
+    expect(renderer.root.findAllByType(Text).map(node => node.props.children)).toContain(receipt);
+    expect(renderer.root.findAllByProps({accessibilityLabel: 'Подтвердить актуальность события'})).toHaveLength(0);
+    expect(renderer.root.findAllByProps({accessibilityLabel: 'Пожаловаться на событие'}).length).toBeGreaterThan(0);
+  });
+
+  it('recognizes the creator signal and does not offer voting or reporting', () => {
+    act(() => {
+      renderer = create(<EventDetailsSheet
+        event={{...event, viewerRelation: 'CREATOR'}}
+        isSubmitting={false}
+        onFeedback={jest.fn()}
+        onClose={jest.fn()}
+      />);
+    });
+    expect(renderer.root.findAllByType(Text).map(node => node.props.children)).toContain('Ваш первый сигнал уже учтён');
+    expect(renderer.root.findAllByProps({accessibilityLabel: 'Подтвердить актуальность события'})).toHaveLength(0);
+    expect(renderer.root.findAllByProps({accessibilityLabel: 'Пожаловаться на событие'})).toHaveLength(0);
+  });
+
+  it.each(['UNCONFIRMED', 'STALE', 'RESOLVED', 'HIDDEN_PENDING_REVIEW'] as const)(
+    'uses the real %s status and disables actions only for inactive events', status => {
+      act(() => {
+        renderer = create(<EventDetailsSheet
+          event={{...event, status}}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={jest.fn()}
+        />);
+      });
+      const inactive = status === 'RESOLVED' || status === 'HIDDEN_PENDING_REVIEW';
+      expect(renderer.root.findAllByProps({accessibilityLabel: 'Подтвердить актуальность события'}).length > 0).toBe(!inactive);
+      expect(renderer.root.findAllByProps({accessibilityLabel: 'Пожаловаться на событие'}).length > 0).toBe(!inactive);
+    },
+  );
+
+  it('shows creation time and last confirmation only when available', () => {
+    act(() => {
+      renderer = create(<EventDetailsSheet
+        event={{...event, lastConfirmedAt: '2026-08-20T12:30:00.000Z'}}
+        isSubmitting={false}
+        onFeedback={jest.fn()}
+        onClose={jest.fn()}
+      />);
+    });
+    const text = renderer.root.findAllByType(Text).map(node => node.props.children);
+    expect(text).toContain('добавлено');
+    expect(text.some(value => Array.isArray(value) && value.includes('Последнее подтверждение: '))).toBe(true);
+    expect(text).toContain('Точка на карте');
   });
 
   it('does not offer a report action for a resolved event', () => {
@@ -368,6 +435,22 @@ describe('EventDetails feedback pending guard', () => {
       );
     });
 
+    expect(renderer.root.findAllByProps({
+      accessibilityLabel: 'Пожаловаться на событие',
+    })).toHaveLength(0);
+  });
+
+  it('does not offer a report action to the event creator', () => {
+    act(() => {
+      renderer = create(
+        <EventDetailsSheet
+          event={{...event, viewerRelation: 'CREATOR'}}
+          isSubmitting={false}
+          onFeedback={jest.fn()}
+          onClose={jest.fn()}
+        />,
+      );
+    });
     expect(renderer.root.findAllByProps({
       accessibilityLabel: 'Пожаловаться на событие',
     })).toHaveLength(0);
@@ -486,11 +569,12 @@ describe('EventDetails feedback pending guard', () => {
       expect.arrayContaining([
         'Улица Комарова',
         'Примерное место',
-        'Точное место не указано',
         'Исходное сообщение',
-        'Комарова притерлись',
       ]),
     );
+    expect(text).not.toContain('Комарова притерлись');
+    act(() => renderer.root.findByProps({accessibilityLabel: 'Исходное сообщение'}).props.onPress());
+    expect(renderer.root.findAllByType(Text).map(node => node.props.children)).toContain('Комарова притерлись');
   });
 
   it('shows useful Telegram context with server-redacted contact data', () => {
@@ -510,11 +594,54 @@ describe('EventDetails feedback pending guard', () => {
       );
     });
 
-    expect(
-      renderer.root
-        .findAllByType(Text)
-        .some(node => node.props.children === safeEvent.sourceText),
-    ).toBe(true);
+    act(() => renderer.root.findByProps({accessibilityLabel: 'Исходное сообщение'}).props.onPress());
+    expect(renderer.root.findAllByType(Text).some(node => node.props.children === safeEvent.sourceText)).toBe(true);
+  });
+
+  it('keeps the complaint below the scroll area for a long Telegram message', () => {
+    act(() => {
+      renderer = create(<EventDetailsSheet
+        event={{...telegramEvent, sourceText: 'Дорожная информация. '.repeat(80)}}
+        isSubmitting={false}
+        onFeedback={jest.fn()}
+        onClose={jest.fn()}
+        bottomInset={34}
+      />);
+    });
+    act(() => renderer.root.findByProps({accessibilityLabel: 'Исходное сообщение'}).props.onPress());
+    expect(renderer.root.findByType(ScrollView).findAllByProps({accessibilityLabel: 'Пожаловаться на событие'})).toHaveLength(0);
+    expect(renderer.root.findByProps({testID: 'event-sheet-footer'}).findAllByProps({accessibilityLabel: 'Пожаловаться на событие'}).length).toBeGreaterThan(0);
+  });
+
+  it('shows approximate Telegram location without inventing an address or message', () => {
+    act(() => {
+      renderer = create(<EventDetailsSheet
+        event={{...telegramEvent, locationPrecision: 'AREA', locationLabel: undefined, sourceText: undefined}}
+        isSubmitting={false}
+        onFeedback={jest.fn()}
+        onClose={jest.fn()}
+      />);
+    });
+    const text = renderer.root.findAllByType(Text).map(node => node.props.children);
+    expect(text).toContain('Примерно в этом районе');
+    expect(text).toContain('Точный адрес не указан');
+    expect(text).toContain('сообщение');
+    expect(renderer.root.findAllByProps({accessibilityLabel: 'Исходное сообщение'})).toHaveLength(0);
+  });
+
+  it('shows an exact Telegram address without an approximation mark', () => {
+    act(() => {
+      renderer = create(<EventDetailsSheet
+        event={{...telegramEvent, locationPrecision: 'EXACT', locationLabel: 'ул. Комарова, 18'}}
+        isSubmitting={false}
+        onFeedback={jest.fn()}
+        onClose={jest.fn()}
+      />);
+    });
+    const text = renderer.root.findAllByType(Text).map(node => node.props.children);
+    expect(text).toContain('ул. Комарова, 18');
+    expect(text).toContain('Точное место');
+    expect(text).not.toContain('≈');
   });
 
   it('does not render USER feedback or confidence for TELEGRAM', () => {
@@ -580,7 +707,7 @@ describe('EventDetails feedback pending guard', () => {
     expect(
       renderer.root
         .findAllByType(Text)
-        .some(node => node.props.children === 'Актуальность под сомнением'),
+        .some(node => node.props.children === 'Давно не подтверждали'),
     ).toBe(true);
   });
 });
