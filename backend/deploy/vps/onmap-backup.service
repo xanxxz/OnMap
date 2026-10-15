@@ -1,0 +1,13 @@
+[Unit]
+Description=OnMap PostgreSQL backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/onmap/backend/deploy/vps
+UMask=0077
+ExecStart=/opt/onmap/backend/deploy/vps/backup.sh
+NoNewPrivileges=true
+PrivateTmp=true

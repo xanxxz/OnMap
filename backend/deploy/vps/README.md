@@ -1,6 +1,6 @@
-# OnMap single-VPS staging
+# OnMap single-VPS deployment
 
-This is a staging recipe, not a production-hardening or deployment claim. It keeps PostgreSQL private, publishes only Caddy on ports 80/443, terminates HTTPS at Caddy, and persists PostgreSQL and certificate state in named volumes. There is no global HTTP/SOCKS proxy and mobile REST/Socket.IO connect directly to the public HTTPS API domain.
+This is a single-host deployment recipe, not a claim that production operations are complete. It keeps PostgreSQL private, publishes only Caddy on ports 80/443, terminates HTTPS at Caddy, and persists PostgreSQL and certificate state in named volumes. There is no global HTTP/SOCKS proxy and mobile REST/Socket.IO connect directly to the public HTTPS API domain. Production still needs monitored offsite backups and a controlled Telegram live-message check.
 
 ## Prepare the VPS
 
@@ -14,7 +14,9 @@ cp backend.env.example backend.env
 chmod 600 .env backend.env
 ```
 
-Edit both files locally on the VPS. Generate independent random values for `POSTGRES_PASSWORD` in `.env` and `IDENTITY_SIGNING_SECRET` in `backend.env`; URL-encode reserved characters in the database password inside `backend.env`'s `DATABASE_URL`. That URL must point at host `postgres`, port `5432`, and the same database/user/password as the `POSTGRES_*` settings. The backend container receives only `backend.env`; it does not receive the separate `POSTGRES_PASSWORD` variable. Set `CORS_ALLOWED_ORIGINS` to a comma-separated list of exact `https://` browser origins that need access; leave it empty for native-only clients, which do not send an `Origin` header. Do not use `*` or add URL paths. Do not put secrets in shell history, Git, Docker build args, or support logs. The sample hostname is intentionally nonfunctional.
+Edit both files locally on the VPS. Generate independent random values for `POSTGRES_PASSWORD` in `.env` and `IDENTITY_SIGNING_SECRET` in `backend.env`; URL-encode reserved characters in the database password inside `backend.env`'s `DATABASE_URL`. That URL must point at host `postgres`, port `5432`, and the same database/user/password as the `POSTGRES_*` settings. The backend container receives `backend.env` and, when present, `telegram.env`; it does not receive the separate `POSTGRES_PASSWORD` variable. Set `CORS_ALLOWED_ORIGINS` to a comma-separated list of exact `https://` browser origins that need access; leave it empty for native-only clients, which do not send an `Origin` header. Do not use `*` or add URL paths. Do not put secrets in shell history, Git, Docker build args, or support logs. The sample hostname is intentionally nonfunctional.
+
+For the `api.balakovo-go.ru` deployment, `bash ./provision-env.sh` is an alternative to copying the examples: it refuses to overwrite existing files and creates independent random PostgreSQL/identity secrets with root-only `600` permissions. Do not run it on an existing installation. Keep production Telegram credentials in a separate root-only `telegram.env`; Compose includes that file only in the backend and one-off preflight, not in the migrator. Both Telegram integrations and push remain disabled until explicitly configured.
 
 Bring up the database and apply migrations before starting the API:
 
@@ -73,6 +75,8 @@ Use a separate test user account with access to a controlled staging group/chann
 
 Bot API success does not validate MTProto, and `telegram:smoke` does not by itself validate persistence/realtime; perform both checks.
 
+For a **new empty database with a real source**, do not use the staging smoke recipe above to post test messages. With ingestion disabled, run the separate one-off `telegram-preflight` Compose profile. It connects, resolves only the configured source, and checks that one latest message exists; it does not start a listener or persist content. On the first runtime start with no cursor, the backend reads up to 30 recent messages into memory and stores the latest as its baseline; it does not create events from that history. Check that `telegram_source_cursors` has no row before enabling ingestion, then confirm one baseline row and no historical events afterward. If a cursor already exists, the runtime uses recovery instead—do not reset it to skip backlog without an explicit decision.
+
 ## Backups
 
 Partner marker images are normalized PNG bytes in the separate `partner_image_assets` PostgreSQL table. They are included in the custom-format database dump; there is no writable container directory or separate image volume. After restoring a dump into an isolated database, verify both a partner point's `image_asset_key` and the matching nonempty `partner_image_assets.png_bytes` row before relying on it. A database-only backup is sufficient for these images, but existing dumps made before this migration cannot contain images uploaded later. Do not copy the read-only backend container filesystem as an image backup.
@@ -83,7 +87,9 @@ Create an operator-controlled local custom-format dump:
 ./backup.sh
 ```
 
-The script writes only under `backend/deploy/vps/backups/`, which is Git-ignored. Restrict directory permissions, encrypt and copy backups to an independently secured offsite location, and set an owner-approved retention policy. Named Docker volumes are persistence, not backups. Test restoration periodically into a separate disposable PostgreSQL/PostGIS database; never restore over the staging database without an explicit maintenance decision. This starter recipe does not configure offsite storage, encryption keys, backup rotation, or restore automation.
+The script writes only under `backend/deploy/vps/backups/`, which is Git-ignored. Restrict directory permissions, encrypt and copy backups to an independently secured offsite location, and set an owner-approved retention policy. Named Docker volumes are persistence, not backups. Test restoration periodically into a separate disposable PostgreSQL/PostGIS database; never restore over the active database without an explicit maintenance decision. This recipe does not configure offsite storage, encryption keys, backup rotation, or automated restore verification.
+
+`verify-backup-restore.sh backups/<dump-name>.dump` restores a dump into a random separate temporary database, checks migrations, PostGIS, image rows and Telegram cursor count, then drops only that temporary database. `onmap-backup.service` and `onmap-backup.timer` can be installed in `/etc/systemd/system/` for daily backups at approximately 03:15 UTC. The timer does not configure offsite copies or pruning; monitor its failures and disk usage.
 
 ## Operations and limits
 

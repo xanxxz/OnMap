@@ -91,3 +91,4 @@ ios/tmp.xcconfig
 
 # Device push provider configuration is supplied locally, never committed.
 android/app/google-services.json
+android/app/src/**/google-services.json

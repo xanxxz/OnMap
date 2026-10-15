@@ -1,13 +1,15 @@
 # OnMap — заметки по release-конфигурации
 
-Проверено 26 сентября 2026 года по текущим файлам проекта. Документ не означает, что архив подписан или готов к публикации.
+Первичный аудит: 26 сентября 2026 года. Идентификаторы Android/iOS и Android build обновлены 13 октября 2026 года. Исторические сведения ниже о доступности инструментов и готовности инфраструктуры не заменяют повторную release-проверку.
+
+Android Release и iOS Release сейчас имеют ID `com.onmap.app`. Android Debug имеет ID `com.onmap.app.dev`; `namespace` и классы сохраняют `com.roadradar.app`. Вариантная Firebase-конфигурация Release лежит в игнорируемом Git `android/app/src/release/google-services.json`; Gradle создал `google_app_id`, `gcm_defaultSenderId` и `project_id`. Debug намеренно не имеет Firebase-конфигурации и собирается без FCM-регистрации. Debug APK собран и его package ID проверен как `com.onmap.app.dev`. Release `:app:assembleRelease` прошёл до `:app:packageRelease`, но APK не создан: signing config не получил `storeFile`. Сгенерированный Release manifest содержит `package="com.onmap.app"`. Это подтверждает Gradle variants, но не заменяет проверку ID готового подписанного APK/AAB и получение FCM-токена на устройстве.
 
 ## Подтверждённые значения
 
 | Параметр | iOS Release | Android Release |
 |---|---|---|
 | Отображаемое название | `OnMap` в `Info.plist` | `app_name` из Android resources; проверить итоговый APK перед релизом |
-| Идентификатор | `com.roadradar.app` в Release build settings | `com.roadradar.app` (`applicationId` и `namespace`) |
+| Идентификатор | `com.onmap.app` в Release build settings | Release `com.onmap.app`, Debug `com.onmap.app.dev`; Kotlin/Java `namespace` остаётся `com.roadradar.app` |
 | Версия / build | `1.0` / `1` в `project.pbxproj` | `1.0` / `1` в `android/app/build.gradle` |
 | Устройства | iPhone и iPad (`TARGETED_DEVICE_FAMILY = 1,2`) | Android variants, min/target SDK — из root Gradle config |
 | Сеть | ATS `NSAllowsArbitraryLoads=false`; локальная сеть разрешена отдельно. Текст локально-сетевого разрешения приведён к назначению приложения, но Release endpoint ещё не настроен | Main manifest включает INTERNET; cleartext разрешён только через debug manifest |
@@ -36,7 +38,7 @@
 
 После предоставления владельцем доступа к Apple Developer:
 
-1. Подтвердить bundle ID `com.roadradar.app`, App Store Connect app record, владельца/Seller name и права команды.
+1. Подтвердить bundle ID `com.onmap.app`, App Store Connect app record, владельца/Seller name и права команды.
 2. Решить, какую Apple Developer team использовать для Release. Сейчас единственный явно указанный Team ID стоит в Debug; переносить его в Release автоматически нельзя.
 3. Настроить automatic signing либо release certificate и provisioning profile для выбранной команды. Подписывать archive именно Release-конфигурацией.
 4. Согласовать новую marketing version/build number вместо шаблонных `1.0`/`1`.
@@ -49,7 +51,7 @@
 
 После установки совместимых JDK и Android SDK:
 
-1. Передать keystore-путь, пароль keystore, alias и пароль ключа только через секретное окружение процесса сборки; не помещать их в `.env`, Gradle properties, командную строку или репозиторий.
+1. Передать keystore-путь, пароль keystore, alias и пароль ключа только через секретное окружение процесса сборки; не помещать их в `.env`, Gradle properties, командную строку или репозиторий. Для FCM Release использует `android/app/src/release/google-services.json` с Firebase Android app `com.onmap.app`; Debug намеренно остаётся без FCM, пока не появится отдельный `src/debug/google-services.json` для `com.onmap.app.dev`.
 2. Выполнить `cd android && ./gradlew :app:assembleRelease` на отдельной release-конфигурации.
 3. Убедиться, что команда завершилась ошибкой при отсутствии signing config и что Release не подписан debug сертификатом.
 4. Проверить `apksigner verify --print-certs <apk>`, сравнить отпечаток с доверенным release keystore и исследовать APK/логи на отсутствие signing secrets и локальных endpoint.
@@ -75,14 +77,14 @@
 - Mobile Jest suite: 38 suites / 182 tests проходят после test-only mock для ESM BlurView; mobile typecheck и ESLint `jest.setup.js` проходят.
 - `xcodebuild -list` не завершился: в sandbox недоступны CoreSimulator/Xcode services и SwiftPM/Clang cache вне workspace. Поэтому успешный Release archive здесь не подтверждён.
 - В текущем локальном `.env` API и Socket endpoints имеют HTTP scheme; `MAPTILER_API_KEY` не задан. Xcode scheme генерирует `ios/tmp.xcconfig` из env, а React Native Config использует выбранный env при сборке. Не архивировать с текущим dev env: production HTTPS API/Socket и map provider configuration появятся только после hosting.
-- Release bundle ID — `com.roadradar.app`, версия/build пока шаблонные `1.0`/`1`. Release Team ID и provisioning не подтверждены. Нужно зарегистрировать Bundle ID в своей Apple Developer team и подписать archive после enrolment.
+- Release bundle ID — `com.onmap.app`, версия/build пока шаблонные `1.0`/`1`. Этот исторический аудит не подтверждает актуальную подпись или App Store Connect запись; их нужно сверять отдельно перед archive.
 - Пользовательские дорожные события являются UGC. Текущая кнопка жалобы только открывает ручной Telegram draft; защищённой очереди обработки, блокировки автора и процедуры снятия события нет. Apple Guideline 1.2 требует фильтрацию UGC, жалобы с своевременной реакцией, возможность блокировки нарушителей и опубликованный контакт: [App Review Guidelines, 1.2](https://developer.apple.com/app-store/review/guidelines/). Поэтому соответствие этому пункту и принятие приложения App Review сейчас не подтверждены.
 - В Privacy Policy и Terms ещё остаются незаполненные публичные URL и юридические поля. Не отправлять placeholder-документы как опубликованные ссылки.
 
 Короткий порядок, чтобы не тратить время на повторные сборки:
 
 1. Завершить решение по модерации UGC: назначить реального оператора/процесс и реализовать минимальные фильтрацию, report handling, hide/block; не заявлять ручной Telegram draft как очередь.
-2. Купить/активировать Apple Developer account; подтвердить seller identity, App Store Connect запись и владение `com.roadradar.app`.
+2. Подтвердить seller identity, App Store Connect запись и владение `com.onmap.app`.
 3. После этого поднять чистый backend на HTTPS, включить согласованные production secrets/integrations, затем подготовить отдельный release env с HTTPS API/Socket и проверенной картой.
 4. Заполнить/опубликовать Privacy Policy и Terms, сверить App Store Connect Privacy Details и App Review Notes.
 5. Выполнить подписанный Release archive, privacy report и smoke на физическом iPhone; загрузить в TestFlight, исправить замечания и только затем отправлять на App Review.
