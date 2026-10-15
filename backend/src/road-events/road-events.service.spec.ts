@@ -496,6 +496,15 @@ describe('RoadEventsService create city bounds', () => {
       );
     });
 
+    it('resolves a hidden reviewed event when its original expiration is reached', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$executeRaw.mockResolvedValueOnce(0);
+      await service.runLifecycleTick();
+      expect(lifecycleSql()).toContain(
+        `event.status = 'HIDDEN_PENDING_REVIEW'::"RoadEventStatus" AND event.expires_at <= NOW()`,
+      );
+    });
+
     it('skips and reports unsupported Telegram event types once', async () => {
       const loggerWarn = jest
         .spyOn(Logger.prototype, 'warn')

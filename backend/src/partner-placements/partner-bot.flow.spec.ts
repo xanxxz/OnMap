@@ -60,6 +60,25 @@ describe('partner bot point wizard', () => {
     expect(partnerDraftPrompt(state)).toContain('не станет активной');
   });
 
+  it('returns to preview after editing one selected field', () => {
+    const state: PartnerDraftState = {
+      kind: 'POINT',
+      step: 'TITLE',
+      revision: 3,
+      payload: {
+        cityId: 'balakovo',
+        contacts: [],
+        title: 'Прежнее название',
+        quickEdit: 'FIELD',
+        quickEditStep: 'TITLE',
+      },
+    };
+    const result = enter(state, 'Новое название');
+    expect(result.error).toBeUndefined();
+    expect(result.state.step).toBe('PREVIEW');
+    expect(result.state.payload).toMatchObject({ title: 'Новое название' });
+  });
+
   it('accepts Telegram location, rejects coordinates outside coverage and invalid dates', () => {
     expect(
       parsePartnerCoordinates(
@@ -109,6 +128,40 @@ describe('partner bot point wizard', () => {
     const choice = { ...kept, step: 'CONTACT_CHOICE' };
     const cleared = enter(choice, '/clear_contacts').state;
     expect((cleared.payload as { contacts: unknown[] }).contacts).toEqual([]);
+  });
+
+  it('retains a contact ID for label/order changes but replaces it when type or value changes', () => {
+    const existing = {
+      id: 'stable-id',
+      type: 'PHONE' as const,
+      label: 'Позвонить',
+      value: '+79990000000',
+      displayOrder: 2,
+    };
+    const startEdit = (type: 'PHONE' | 'WEBSITE', value: string) => {
+      let state: PartnerDraftState = {
+        kind: 'POINT',
+        step: 'CONTACT_TYPE',
+        revision: 1,
+        payload: {
+          cityId: 'balakovo',
+          contacts: [existing],
+          pendingContact: { editingIndex: 0 },
+        },
+      };
+      state = enter(state, type).state;
+      state = enter(state, 'Новая подпись').state;
+      return enter(state, value).state.payload as {
+        contacts: Array<{ id?: string; label: string; displayOrder: number }>;
+      };
+    };
+    expect(startEdit('PHONE', '+79990000000').contacts[0]).toMatchObject({
+      id: 'stable-id',
+      label: 'Новая подпись',
+      displayOrder: 2,
+    });
+    expect(startEdit('PHONE', '+79991111111').contacts[0].id).toBeUndefined();
+    expect(startEdit('WEBSITE', '+79990000000').contacts[0].id).toBeUndefined();
   });
 
   it('keeps case, skips or clears a promo code, and rejects hard-to-copy input', () => {
@@ -187,5 +240,41 @@ describe('partner bot banner wizard', () => {
     expect(
       advancePartnerDraft(state, { text: 'ещё текст' }, now).error,
     ).toContain('кнопку');
+  });
+
+  it('returns quick banner edits to preview without walking through unrelated fields', () => {
+    const base = {
+      cityId: 'balakovo',
+      title: 'Old title',
+      text: 'Old text',
+      buttonLabel: 'Open',
+      buttonUrl: 'https://example.com',
+      partnerPointId: '00000000-0000-4000-8000-000000000001',
+      startsAt: '2026-10-10T08:00:00.000Z',
+      endsAt: '2026-10-20T08:00:00.000Z',
+      preserveEnabled: false,
+    };
+    for (const [first, last, values] of [
+      ['TITLE', 'TEXT', ['New title', 'New text']],
+      ['BUTTON_LABEL', 'BUTTON_URL', ['View', 'https://example.org']],
+      [
+        'STARTS_AT',
+        'ENDS_AT',
+        ['2026-10-11T08:00:00.000Z', '2026-10-21T08:00:00.000Z'],
+      ],
+    ] as const) {
+      let state: PartnerDraftState = {
+        kind: 'BANNER',
+        step: first,
+        revision: 0,
+        payload: { ...base, quickEditEndStep: last },
+      };
+      for (const text of values)
+        state = advancePartnerDraft(state, { text }, now).state;
+      expect(state.step).toBe('PREVIEW');
+      expect(partnerDraftPrompt(state)).toContain(
+        'Изменения не включат баннер',
+      );
+    }
   });
 });

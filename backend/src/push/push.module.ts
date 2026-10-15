@@ -5,6 +5,8 @@ import { PushDevicesService } from './push-devices.service';
 import { PushOutboxService } from './push-outbox.service';
 import { PUSH_PROVIDER } from './push-provider';
 import { ConfiguredPushProvider } from './configured-push-provider';
+import { PushCampaignSchedulerService } from './push-campaign-scheduler.service';
+import { PushOwnerPairingService } from './push-owner-pairing.service';
 
 @Module({
   imports: [IdentityModule],
@@ -12,8 +14,15 @@ import { ConfiguredPushProvider } from './configured-push-provider';
   providers: [
     PushDevicesService,
     PushOutboxService,
+    PushCampaignSchedulerService,
+    PushOwnerPairingService,
     { provide: PUSH_PROVIDER, useClass: ConfiguredPushProvider },
   ],
-  exports: [PushDevicesService, PushOutboxService],
+  exports: [
+    PushDevicesService,
+    PushOutboxService,
+    PushCampaignSchedulerService,
+    PushOwnerPairingService,
+  ],
 })
 export class PushModule {}

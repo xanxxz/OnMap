@@ -4,7 +4,7 @@ export interface PushMessage {
   collapseKey: string;
   title: string;
   body: string;
-  data: {
+  data?: {
     kind: 'ROAD_EVENT' | 'PARTNER_POINT';
     targetId: string;
     cityId: string;

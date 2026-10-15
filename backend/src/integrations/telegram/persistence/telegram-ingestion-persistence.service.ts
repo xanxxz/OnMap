@@ -228,6 +228,13 @@ export class TelegramIngestionPersistenceService {
           roadEventId,
           'UPDATED',
         );
+        if (process.env.PUSH_ENQUEUE_ENABLED === 'true') {
+          await queueRoadEventPush(transaction, {
+            id: roadEventId,
+            cityId: candidate.cityId,
+            type: candidate.type,
+          });
+        }
 
         return { status: 'UPDATED', roadEventId };
       }
@@ -395,6 +402,13 @@ export class TelegramIngestionPersistenceService {
         true,
       );
       await this.insertMessageMapping(transaction, event, target.id, 'UPDATED');
+      if (process.env.PUSH_ENQUEUE_ENABLED === 'true') {
+        await queueRoadEventPush(transaction, {
+          id: target.id,
+          cityId: candidate.cityId,
+          type: candidate.type,
+        });
+      }
 
       return { status: 'UPDATED', roadEventId: target.id };
     }

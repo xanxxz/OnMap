@@ -3,9 +3,17 @@ import { RoadEventsModule } from '../../../road-events/road-events.module';
 import { TelegramModerationBotService } from './telegram-moderation-bot.service';
 import { TelegramSingletonLockModule } from '../telegram-singleton-lock.module';
 import { PartnerBotService } from '../../../partner-placements/partner-bot.service';
+import { PushCampaignBotService } from '../../../push/push-campaign-bot.service';
+import { TelegramOwnerPanelService } from './telegram-owner-panel.service';
+import { PushModule } from '../../../push/push.module';
 
 @Module({
-  imports: [RoadEventsModule, TelegramSingletonLockModule],
-  providers: [TelegramModerationBotService, PartnerBotService],
+  imports: [RoadEventsModule, TelegramSingletonLockModule, PushModule],
+  providers: [
+    TelegramModerationBotService,
+    PartnerBotService,
+    PushCampaignBotService,
+    TelegramOwnerPanelService,
+  ],
 })
 export class TelegramModerationBotModule {}

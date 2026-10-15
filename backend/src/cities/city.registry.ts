@@ -14,12 +14,19 @@ export class CitiesRegistry {
   get(cityId: string): CityConfig | undefined {
     return this.configs.get(cityId);
   }
+
+  ids(): readonly string[] {
+    return [...this.configs.keys()];
+  }
 }
 
 export const citiesRegistry = new CitiesRegistry([BALAKOVO_CITY_CONFIG]);
 
 export const getCityConfig = (cityId: string): CityConfig | undefined =>
   citiesRegistry.get(cityId);
+
+export const getAvailableCityIds = (): readonly string[] =>
+  citiesRegistry.ids();
 
 const cityImportConfigs = new CitiesRegistry([BALAKOVO_BASE_CITY_CONFIG]);
 

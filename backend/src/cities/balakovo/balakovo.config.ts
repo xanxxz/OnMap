@@ -8,6 +8,7 @@ import { BALAKOVO_LOCATION_DICTIONARY } from '../../integrations/telegram/parser
 export const BALAKOVO_BASE_CITY_CONFIG: CityConfig = {
   id: 'balakovo',
   name: 'Балаково',
+  timeZone: 'Europe/Saratov',
   center: {
     latitude: 52.0278,
     longitude: 47.8007,

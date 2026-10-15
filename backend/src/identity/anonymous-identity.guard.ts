@@ -8,6 +8,7 @@ import {
 import type { Request } from 'express';
 
 import { IdentityService } from './identity.service';
+import { IdentityTrackingService } from './identity-tracking.service';
 
 export interface AnonymousIdentityRequest extends Request {
   anonymousIdentityId?: string;
@@ -15,9 +16,12 @@ export interface AnonymousIdentityRequest extends Request {
 
 @Injectable()
 export class AnonymousIdentityGuard implements CanActivate {
-  constructor(private readonly identityService: IdentityService) {}
+  constructor(
+    private readonly identityService: IdentityService,
+    private readonly tracking: IdentityTrackingService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context
       .switchToHttp()
       .getRequest<AnonymousIdentityRequest>();
@@ -37,6 +41,8 @@ export class AnonymousIdentityGuard implements CanActivate {
     request.anonymousIdentityId = this.identityService.verifyAnonymousIdentity(
       match[1],
     );
+
+    await this.tracking.recordSafely(request.anonymousIdentityId);
 
     return true;
   }

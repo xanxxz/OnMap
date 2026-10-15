@@ -81,6 +81,7 @@ export interface CityCoverageMultiPolygon {
 export interface CityConfig {
   readonly id: string;
   readonly name: string;
+  readonly timeZone?: string;
   readonly center: CityCoordinate;
   readonly defaultZoom: number;
   readonly coverageBounds: CityBounds;

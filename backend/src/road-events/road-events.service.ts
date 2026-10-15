@@ -131,12 +131,12 @@ export class RoadEventsService
 
   onApplicationBootstrap() {
     this.lifecycleInterval = setInterval(() => {
-      void this.runScheduledLifecycleTick();
+      this.runScheduledLifecycleTick().catch(() => undefined);
     }, ROAD_EVENT_LIFECYCLE_INTERVAL_MS);
 
     this.lifecycleInterval.unref();
 
-    void this.runScheduledLifecycleTick();
+    this.runScheduledLifecycleTick().catch(() => undefined);
   }
 
   onModuleDestroy() {
@@ -692,6 +692,18 @@ export class RoadEventsService
                     AS "expiresAt"
               `;
 
+      if (
+        result[0] &&
+        dto.action === 'CONFIRM' &&
+        process.env.PUSH_ENQUEUE_ENABLED === 'true'
+      ) {
+        await queueRoadEventPush(transaction, {
+          id: result[0].id,
+          cityId: result[0].cityId,
+          type: result[0].type,
+        });
+      }
+
       return result[0];
     });
 
@@ -816,6 +828,11 @@ export class RoadEventsService
             )
             AND event.status <> 'RESOLVED'::"RoadEventStatus"
             AND (
+              (
+                event.status = 'HIDDEN_PENDING_REVIEW'::"RoadEventStatus"
+                AND event.expires_at <= NOW()
+              )
+              OR
               (
                 event.source = 'USER'::"RoadEventSource"
                 AND event.expires_at <= NOW()

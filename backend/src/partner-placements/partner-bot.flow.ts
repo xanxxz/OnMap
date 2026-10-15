@@ -2,6 +2,7 @@ import {
   getCityConfig,
   isCoordinateInsideCityCoverage,
 } from '../cities/city.registry';
+import { formatCityTime } from '../cities/city-local-time';
 import {
   DEFAULT_PARTNER_BACKGROUND_COLOR,
   DEFAULT_PARTNER_TEXT_COLOR,
@@ -14,6 +15,7 @@ export type PartnerContactKind =
   'PHONE' | 'EMAIL' | 'WEBSITE' | 'TELEGRAM' | 'OTHER';
 
 export interface ContactDraft {
+  id?: string;
   type: PartnerContactKind;
   label: string;
   value: string;
@@ -23,6 +25,8 @@ export interface ContactDraft {
 export interface PointDraft {
   cityId: string;
   editingId?: string;
+  quickEdit?: 'CONTACTS' | 'IMAGE' | 'PROMO' | 'FIELD';
+  quickEditStep?: string;
   title?: string;
   category?: string;
   backgroundColor?: string;
@@ -30,25 +34,31 @@ export interface PointDraft {
   imageAssetKey?: string | null;
   originalImageAssetKey?: string | null;
   promoCode?: string | null;
+  promoTerms?: string | null;
   description?: string | null;
   latitude?: number;
   longitude?: number;
   displayAddress?: string | null;
   contacts: ContactDraft[];
-  pendingContact?: Partial<ContactDraft>;
+  pendingContact?: Partial<ContactDraft> & { editingIndex?: number };
   startsAt?: string;
   endsAt?: string;
+  dateSelection?: { day?: string; hour?: number; page?: number };
 }
 
 export interface BannerDraft {
   cityId: string;
+  quickEditEndStep?: 'TEXT' | 'BUTTON_URL' | 'ENDS_AT';
+  preserveEnabled?: boolean;
   title?: string;
   text?: string;
   buttonLabel?: string;
   buttonUrl?: string;
   partnerPointId?: string;
+  pointChoices?: Array<{ id: string; title: string }>;
   startsAt?: string;
   endsAt?: string;
+  dateSelection?: { day?: string; hour?: number; page?: number };
 }
 
 export interface PartnerDraftState {
@@ -126,6 +136,18 @@ export const isSafePartnerButtonUrl = (value: string): boolean => {
 const field = (value: string | null | undefined) =>
   value ? ` Текущее: ${value}. /keep — оставить.` : '';
 
+const displayPeriod = (
+  cityId: string,
+  start?: string,
+  end?: string,
+): string => {
+  const timeZone = getCityConfig(cityId)?.timeZone;
+  if (!timeZone) return 'часовой пояс города не задан';
+  const render = (value?: string) =>
+    value ? formatCityTime(new Date(value), timeZone) : 'не выбрано';
+  return `${render(start)} — ${render(end)}`;
+};
+
 export const partnerDraftPrompt = (state: PartnerDraftState): string => {
   const payload = state.payload;
   if (state.kind === 'POINT') {
@@ -144,15 +166,15 @@ export const partnerDraftPrompt = (state: PartnerDraftState): string => {
       case 'CONTACT_CHOICE':
         return `Контактов: ${point.contacts.length}. Нажмите «Добавить контакт» или «Готово». /clear_contacts — удалить существующие.`;
       case 'CONTACT_TYPE':
-        return 'Тип контакта: PHONE, EMAIL, WEBSITE, TELEGRAM или OTHER.';
+        return 'Выберите тип контакта: телефон, почта, сайт, Telegram или другое.';
       case 'CONTACT_LABEL':
         return 'Подпись контакта (до 80 символов).';
       case 'CONTACT_VALUE':
         return 'Значение контакта (до 500 символов).';
       case 'STARTS_AT':
-        return `Начало размещения в ISO с часовым поясом, например 2026-10-10T12:00+04:00.${field(point.startsAt)}`;
+        return `Выберите начало размещения кнопками по местному времени города.${field(point.startsAt)}`;
       case 'ENDS_AT':
-        return `Конец размещения в ISO с часовым поясом; позже начала и текущего времени.${field(point.endsAt)}`;
+        return `Выберите окончание размещения кнопками. Оно должно быть позже начала и текущего времени.${field(point.endsAt)}`;
       case 'BACKGROUND_COLOR':
         return `Цвет плашки и кнопки карточки: #RRGGBB. Выберите кнопку ниже или пришлите HEX.${field(point.backgroundColor ?? DEFAULT_PARTNER_BACKGROUND_COLOR)}`;
       case 'TEXT_COLOR':
@@ -161,6 +183,8 @@ export const partnerDraftPrompt = (state: PartnerDraftState): string => {
         return `Пришлите PNG, JPEG или WebP как фото или файл (до 4 МБ). Изображение станет квадратной прозрачной меткой без обрезки. /skip — ${point.imageAssetKey ? 'оставить текущее' : 'без изображения'}.`;
       case 'PROMO_CODE':
         return `Промокод: 3–32 буквы/цифры, дефис или _. Без пробелов. /skip — ${point.promoCode ? 'оставить текущий' : 'без промокода'}; /clear_promo — удалить.${field(point.promoCode)}`;
+      case 'PROMO_TERMS':
+        return `Условия промокода (до 240 символов); /skip — ${point.promoTerms ? 'оставить текущие' : 'не указывать'}, /clear_terms — убрать условия.${field(point.promoTerms)}`;
       default:
         return partnerPointPreview(point);
     }
@@ -178,9 +202,9 @@ export const partnerDraftPrompt = (state: PartnerDraftState): string => {
     case 'POINT_ID':
       return `ID связанной точки.${field(banner.partnerPointId)}`;
     case 'STARTS_AT':
-      return `Начало баннера в ISO с часовым поясом.${field(banner.startsAt)}`;
+      return `Начало баннера: выберите дату и время кнопками по местному времени города.${field(banner.startsAt)}`;
     case 'ENDS_AT':
-      return `Конец баннера в ISO с часовым поясом.${field(banner.endsAt)}`;
+      return `Окончание баннера: выберите дату и время кнопками по местному времени города.${field(banner.endsAt)}`;
     default:
       return partnerBannerPreview(banner);
   }
@@ -197,7 +221,10 @@ const partnerPointPreview = (point: PointDraft): string =>
     `Цвет: ${point.backgroundColor ?? DEFAULT_PARTNER_BACKGROUND_COLOR} / текст ${point.textColor ?? DEFAULT_PARTNER_TEXT_COLOR}`,
     `Изображение метки: ${point.imageAssetKey ? 'есть' : 'нет'}`,
     `Промокод: ${point.promoCode ?? 'не указан'}`,
-    `Срок: ${point.startsAt} — ${point.endsAt}`,
+    ...(point.promoCode && point.promoTerms
+      ? [`Условия: ${point.promoTerms}`]
+      : []),
+    `Срок: ${displayPeriod(point.cityId, point.startsAt, point.endsAt)}`,
     'Точка не станет активной, пока вы не нажмёте «Подтвердить».',
   ].join('\n');
 
@@ -209,8 +236,10 @@ const partnerBannerPreview = (banner: BannerDraft): string =>
     `Кнопка: ${banner.buttonLabel} → ${banner.buttonUrl}`,
     `Связанная точка: ${banner.partnerPointId}`,
     'Фон и цвет текста берутся из связанной точки.',
-    `Срок: ${banner.startsAt} — ${banner.endsAt}`,
-    'Баннер останется выключенным до отдельного подтверждения. Он не продлевает и не включает точку.',
+    `Срок: ${displayPeriod(banner.cityId, banner.startsAt, banner.endsAt)}`,
+    banner.preserveEnabled === false
+      ? 'Изменения не включат баннер. Для включения нужна отдельная кнопка. Он не продлевает и не включает точку.'
+      : 'Баннер не продлевает и не включает точку.',
   ].join('\n');
 
 export const advancePartnerDraft = (
@@ -299,7 +328,7 @@ export const advancePartnerDraft = (
       case 'CONTACT_TYPE': {
         const type = text.toUpperCase() as PartnerContactKind;
         if (!CONTACT_TYPES.has(type)) return fail('Недопустимый тип контакта.');
-        point.pendingContact = { type };
+        point.pendingContact = { ...point.pendingContact, type };
         next.step = 'CONTACT_LABEL';
         break;
       }
@@ -309,22 +338,36 @@ export const advancePartnerDraft = (
         point.pendingContact = { ...point.pendingContact, label: text };
         next.step = 'CONTACT_VALUE';
         break;
-      case 'CONTACT_VALUE':
+      case 'CONTACT_VALUE': {
         if (!text || text.startsWith('/') || text.length > 500)
           return fail('Значение: 1–500 символов.');
-        point.contacts.push({
+        const contact: ContactDraft = {
+          ...(point.pendingContact?.editingIndex !== undefined &&
+          point.contacts[point.pendingContact.editingIndex]?.type ===
+            point.pendingContact.type &&
+          point.contacts[point.pendingContact.editingIndex]?.value === text &&
+          point.contacts[point.pendingContact.editingIndex]?.id
+            ? { id: point.contacts[point.pendingContact.editingIndex].id }
+            : {}),
           type: point.pendingContact?.type as PartnerContactKind,
           label: point.pendingContact?.label ?? '',
           value: text,
           displayOrder:
-            Math.max(
-              -1,
-              ...point.contacts.map((contact) => contact.displayOrder),
-            ) + 1,
-        });
+            point.pendingContact?.editingIndex === undefined
+              ? Math.max(
+                  -1,
+                  ...point.contacts.map((existing) => existing.displayOrder),
+                ) + 1
+              : (point.contacts[point.pendingContact.editingIndex]
+                  ?.displayOrder ?? 0),
+        };
+        if (point.pendingContact?.editingIndex === undefined)
+          point.contacts.push(contact);
+        else point.contacts[point.pendingContact.editingIndex] = contact;
         delete point.pendingContact;
         next.step = 'CONTACT_CHOICE';
         break;
+      }
       case 'STARTS_AT':
       case 'ENDS_AT': {
         const value =
@@ -334,6 +377,7 @@ export const advancePartnerDraft = (
         if (!value) return fail('Укажите ISO дату и время с часовым поясом.');
         if (state.step === 'STARTS_AT') {
           point.startsAt = value;
+          delete point.dateSelection;
           next.step = 'ENDS_AT';
         } else {
           if (
@@ -342,6 +386,7 @@ export const advancePartnerDraft = (
           )
             return fail('Конец должен быть позже начала и текущего времени.');
           point.endsAt = value;
+          delete point.dateSelection;
           next.step = 'BACKGROUND_COLOR';
         }
         break;
@@ -374,11 +419,13 @@ export const advancePartnerDraft = (
       case 'IMAGE':
         if (text !== '/skip' && text !== '/keep')
           return fail('Пришлите PNG, JPEG или WebP либо /skip.');
-        next.step = 'PROMO_CODE';
+        next.step = point.quickEdit === 'IMAGE' ? 'PREVIEW' : 'PROMO_CODE';
         break;
       case 'PROMO_CODE': {
-        if (text === '/clear_promo') point.promoCode = null;
-        else if (text !== '/skip' && text !== '/keep') {
+        if (text === '/clear_promo') {
+          point.promoCode = null;
+          point.promoTerms = null;
+        } else if (text !== '/skip' && text !== '/keep') {
           const code = parsePartnerPromoCode(text);
           if (!code)
             return fail(
@@ -386,6 +433,17 @@ export const advancePartnerDraft = (
             );
           point.promoCode = code;
         }
+        next.step = point.promoCode ? 'PROMO_TERMS' : 'PREVIEW';
+        break;
+      }
+      case 'PROMO_TERMS': {
+        if (!point.promoCode) return fail('Сначала укажите промокод.');
+        if (text === '/clear_terms') point.promoTerms = null;
+        else if (text === '/skip' || text === '/keep') {
+          // Existing terms remain, including null for legacy codes.
+        } else if (!text || text.startsWith('/') || text.length > 240)
+          return fail('Условия: 1–240 символов.');
+        else point.promoTerms = text;
         next.step = 'PREVIEW';
         break;
       }
@@ -429,8 +487,22 @@ export const advancePartnerDraft = (
       )
         return fail('Конец должен быть позже начала и текущего времени.');
       banner[key] = value;
+      delete banner.dateSelection;
       next.step = state.step === 'STARTS_AT' ? 'ENDS_AT' : 'PREVIEW';
     }
+  }
+  if (
+    state.kind === 'POINT' &&
+    (next.payload as PointDraft).quickEdit === 'FIELD' &&
+    (next.payload as PointDraft).quickEditStep === state.step
+  ) {
+    next.step = 'PREVIEW';
+  }
+  if (
+    state.kind === 'BANNER' &&
+    (next.payload as BannerDraft).quickEditEndStep === state.step
+  ) {
+    next.step = 'PREVIEW';
   }
   next.revision += 1;
   return { state: next };

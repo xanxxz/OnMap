@@ -82,6 +82,7 @@ enum PushProviderKind {
 enum PushOutboxKind {
   ROAD_EVENT
   PARTNER_POINT
+  GENERAL
 }
 
 enum PushOutboxStatus {
@@ -98,6 +99,30 @@ enum PartnerPushCampaignStatus {
   CANCELLED
 }
 
+enum PushCampaignKind {
+  GENERAL
+  PARTNER_POINT
+}
+
+enum PushScheduleKind {
+  NOW
+  ONCE
+  DAILY
+  WEEKLY
+}
+
+enum PushCampaignStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  COMPLETED
+}
+
+enum PushCampaignRunStatus {
+  QUEUED
+  SKIPPED
+}
+
 // Tokens are server-only delivery credentials. Neither token nor identity key is public.
 model PushDevice {
   id String @id @default(uuid()) @db.Uuid
@@ -109,6 +134,8 @@ model PushDevice {
   token String @db.VarChar(512)
   tokenHash String @unique @map("token_hash") @db.Char(64)
   enabled Boolean @default(true)
+  roadPushEnabled Boolean @default(true) @map("road_push_enabled")
+  newsPushEnabled Boolean @default(true) @map("news_push_enabled")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   deliveries PushOutbox[]
@@ -125,6 +152,7 @@ model PushOutbox {
   kind PushOutboxKind
   targetId String @map("target_id") @db.Uuid
   cityId String @map("city_id") @db.VarChar(64)
+  campaignRunId String? @map("campaign_run_id") @db.Uuid
   status PushOutboxStatus @default(PENDING)
   attempts Int @default(0)
   nextAttemptAt DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
@@ -133,10 +161,124 @@ model PushOutbox {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   device PushDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  campaignRun PushCampaignRun? @relation(fields: [campaignRunId], references: [id], onDelete: SetNull)
 
   @@unique([deviceId, dedupeKey], map: "push_outbox_device_dedupe_key")
   @@index([status, nextAttemptAt], map: "push_outbox_due_idx")
   @@map("push_outbox")
+}
+
+model PushCampaign {
+  id String @id @default(uuid()) @db.Uuid
+  ownerTelegramId String @map("owner_telegram_id") @db.VarChar(64)
+  kind PushCampaignKind
+  partnerPointId String? @map("partner_point_id") @db.Uuid
+  cityIds Json @map("city_ids")
+  title String @db.VarChar(100)
+  body String @db.VarChar(240)
+  scheduleKind PushScheduleKind @map("schedule_kind")
+  localTime String? @map("local_time") @db.VarChar(5)
+  weekday Int?
+  endsAt DateTime? @map("ends_at") @db.Timestamptz(3)
+  nextRunAt DateTime? @map("next_run_at") @db.Timestamptz(3)
+  status PushCampaignStatus @default(ACTIVE)
+  revision Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  runs PushCampaignRun[]
+  citySchedules PushCampaignCitySchedule[]
+
+  @@index([status, nextRunAt], map: "push_campaign_due_idx")
+  @@index([ownerTelegramId, createdAt], map: "push_campaign_owner_idx")
+  @@map("push_campaigns")
+}
+
+model PushCampaignCitySchedule {
+  campaignId String @map("campaign_id") @db.Uuid
+  cityId String @map("city_id") @db.VarChar(64)
+  timeZone String @map("time_zone") @db.VarChar(64)
+  nextRunAt DateTime? @map("next_run_at") @db.Timestamptz(3)
+  endsAt DateTime? @map("ends_at") @db.Timestamptz(3)
+  campaign PushCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, cityId])
+  @@index([nextRunAt], map: "push_campaign_city_due_idx")
+  @@map("push_campaign_city_schedules")
+}
+
+model PushCampaignRun {
+  id String @id @default(uuid()) @db.Uuid
+  campaignId String @map("campaign_id") @db.Uuid
+  cityId String @default("") @map("city_id") @db.VarChar(64)
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(3)
+  status PushCampaignRunStatus
+  audienceCount Int @default(0) @map("audience_count")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  campaign PushCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  deliveries PushOutbox[]
+
+  @@unique([campaignId, cityId, scheduledAt], map: "push_campaign_run_city_schedule_key")
+  @@map("push_campaign_runs")
+}
+
+model PushBotDraft {
+  ownerTelegramId String @id @map("owner_telegram_id") @db.VarChar(64)
+  step String @db.VarChar(32)
+  payload Json
+  revision Int @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("push_bot_drafts")
+}
+
+// Owner-only Telegram control-panel state. Opaque callbacks never contain
+// entity identifiers or user-entered text.
+model TelegramBotPanelSession {
+  ownerTelegramId String @id @map("owner_telegram_id") @db.VarChar(64)
+  screen String @db.VarChar(48)
+  revision Int @default(0)
+  payload Json
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("telegram_bot_panel_sessions")
+}
+
+model TelegramBotPanelAction {
+  token String @id @db.VarChar(24)
+  ownerTelegramId String @map("owner_telegram_id") @db.VarChar(64)
+  revision Int
+  action String @db.VarChar(48)
+  payload Json
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ownerTelegramId, revision], map: "telegram_bot_panel_actions_owner_revision_idx")
+  @@index([expiresAt], map: "telegram_bot_panel_actions_expiry_idx")
+  @@map("telegram_bot_panel_actions")
+}
+
+model PushOwnerPairing {
+  id String @id @default(uuid()) @db.Uuid
+  ownerTelegramId String @map("owner_telegram_id") @db.VarChar(64)
+  codeHash String @unique @map("code_hash") @db.VarChar(64)
+  deviceId String? @map("device_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  testSentAt DateTime? @map("test_sent_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ownerTelegramId, consumedAt], map: "push_owner_pairings_owner_idx")
+  @@index([expiresAt], map: "push_owner_pairings_expiry_idx")
+  @@map("push_owner_pairings")
+}
+
+model PushOwnerPairingAttempt {
+  identityKey String @id @map("identity_key") @db.VarChar(64)
+  count Int @default(0)
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+
+  @@map("push_owner_pairing_attempts")
 }
 
 model PartnerPushCampaign {
@@ -161,6 +303,7 @@ model PartnerStatDaily {
 
   @@unique([partnerPointId, action, detailId, day], map: "partner_stat_daily_unique")
   @@index([partnerPointId, day], map: "partner_stat_daily_point_day_idx")
+  @@index([day, action], map: "partner_stat_daily_day_action_idx")
   @@map("partner_stat_daily")
 }
 
@@ -205,6 +348,8 @@ model PartnerPoint {
 
   promoCode String? @map("promo_code") @db.VarChar(32)
 
+  promoTerms String? @map("promo_terms") @db.VarChar(240)
+
   agreedPriceKopecks BigInt? @map("agreed_price_kopecks")
 
   paidAt DateTime? @map("paid_at") @db.Timestamptz(3)
@@ -226,6 +371,22 @@ model PartnerPoint {
   @@index([cityId, status, startsAt, endsAt], map: "partner_points_visibility_idx")
   @@index([cityId, longitude, latitude], map: "partner_points_viewport_idx")
   @@map("partner_points")
+}
+
+// First observed after tracking was deployed; never stores tokens or raw identities.
+model AnonymousIdentitySeen {
+  identityHash String @id @map("identity_hash") @db.Char(64)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+
+  @@map("anonymous_identities_seen")
+}
+
+model AnonymousIdentityCount {
+  id Int @id
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz(3)
+  count BigInt @default(0)
+
+  @@map("anonymous_identity_count")
 }
 
 // Small normalized PNG marker assets live in PostgreSQL, not in the read-only container.

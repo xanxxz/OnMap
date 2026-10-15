@@ -11,6 +11,13 @@ import { RoadEventsGateway } from '../../../road-events/realtime/road-events.gat
 import type { RoadEventRealtimePayload } from '../../../road-events/road-events.types';
 import { sanitizeTelegramSourceText } from '../../../road-events/telegram-source-text';
 import { PartnerBotService } from '../../../partner-placements/partner-bot.service';
+import { PushCampaignBotService } from '../../../push/push-campaign-bot.service';
+import {
+  TelegramOwnerPanelService,
+  type PanelDelegate,
+  type PanelReply,
+} from './telegram-owner-panel.service';
+import { PushOwnerPairingService } from '../../../push/push-owner-pairing.service';
 import {
   downloadPartnerTelegramImage,
   telegramImageReference,
@@ -80,6 +87,7 @@ type CallbackOutcome = {
     | 'NO_CASE'
     | 'ALREADY_DECIDED'
     | 'RESTORED'
+    | 'CLOSED_HIDDEN'
     | 'RESTRICTED'
     | 'EXPIRED'
     | 'AUTHOR_UNAVAILABLE'
@@ -163,6 +171,9 @@ export class TelegramModerationBotService
     private readonly gateway: RoadEventsGateway,
     private readonly singletonLock: TelegramSingletonLockService,
     private readonly partnerBot: PartnerBotService,
+    private readonly pushCampaignBot: PushCampaignBotService,
+    private readonly ownerPanel: TelegramOwnerPanelService,
+    private readonly ownerPairing: PushOwnerPairingService,
   ) {
     this.token =
       config.get<string>(TELEGRAM_MODERATION_CONFIG.tokenEnv)?.trim() ?? '';
@@ -174,7 +185,7 @@ export class TelegramModerationBotService
   }
 
   onApplicationBootstrap(): void {
-    void this.startPoller();
+    this.startPoller().catch(() => undefined);
   }
 
   private async startPoller(): Promise<void> {
@@ -214,12 +225,12 @@ export class TelegramModerationBotService
     this.active = true;
     this.stopped = false;
     this.outboxTimer = setInterval(
-      () => void this.processOneOutbox(),
+      () => this.processOneOutbox().catch(() => undefined),
       TELEGRAM_MODERATION_CONFIG.outboxPollIntervalMs,
     );
     this.outboxTimer.unref();
     this.pollLoopPromise = this.pollLoop();
-    void this.processOneOutbox();
+    this.processOneOutbox().catch(() => undefined);
     this.logger.log('Telegram moderation bot enabled');
   }
 
@@ -287,6 +298,66 @@ export class TelegramModerationBotService
     const updateId = update.update_id;
     if (typeof updateId !== 'number' || !Number.isSafeInteger(updateId)) return;
 
+    if (this.ownerPanel.shouldHandle(update)) {
+      const panelReply = await this.ownerPanel.process(update);
+      const reply = panelReply.delegate
+        ? await this.processPanelDelegation(update, panelReply.delegate)
+        : panelReply;
+      const callback = asRecord(update.callback_query);
+      const callbackId = idString(callback?.id);
+      if (callbackId)
+        await this.safeApiCall('answerCallbackQuery', {
+          callback_query_id: callbackId,
+          text: reply.duplicate
+            ? 'Уже обработано'
+            : (reply.callbackText ?? 'Готово'),
+        });
+      if (!reply.duplicate && reply.text) {
+        const keyboard = this.panelNavigation(reply);
+        if (panelReply.editMessageId && !panelReply.delegate) {
+          try {
+            await this.callApi('editMessageText', {
+              chat_id: reply.chatId,
+              message_id: panelReply.editMessageId,
+              text: reply.text.slice(0, 4_000),
+              reply_markup: keyboard,
+            });
+            return;
+          } catch {
+            // Telegram can reject editing an old/non-text message; send a new one.
+          }
+        }
+        await this.safeApiCall('sendMessage', {
+          chat_id: reply.chatId,
+          text: reply.text.slice(0, 4_000),
+          reply_markup: keyboard,
+        });
+      }
+      return;
+    }
+
+    if (await this.pushCampaignBot.shouldHandle(update)) {
+      const reply = await this.pushCampaignBot.process(update);
+      const callback = asRecord(update.callback_query);
+      const callbackId = idString(callback?.id);
+      if (callbackId) {
+        await this.safeApiCall('answerCallbackQuery', {
+          callback_query_id: callbackId,
+          text: reply.duplicate
+            ? 'Уже обработано'
+            : (reply.callbackText ?? 'Готово'),
+        });
+      }
+      if (!reply.duplicate && reply.text) {
+        await this.safeApiCall('sendMessage', {
+          chat_id: reply.chatId,
+          text: reply.text.slice(0, 4_000),
+          ...(reply.keyboard ? { reply_markup: reply.keyboard } : {}),
+        });
+      }
+      return;
+    }
+
     if (await this.partnerBot.shouldHandle(update)) {
       const imageReference = telegramImageReference(update.message);
       let imageInput: { bytes: Buffer } | { error: string } | undefined;
@@ -329,6 +400,17 @@ export class TelegramModerationBotService
           ...(reply.keyboard ? { reply_markup: reply.keyboard } : {}),
         });
       }
+      return;
+    }
+
+    if (await this.ownerPanel.shouldHandleSearchText(update)) {
+      const reply = await this.ownerPanel.process(update);
+      if (!reply.duplicate && reply.text)
+        await this.safeApiCall('sendMessage', {
+          chat_id: reply.chatId,
+          text: reply.text.slice(0, 4_000),
+          reply_markup: this.panelNavigation(reply),
+        });
       return;
     }
 
@@ -384,6 +466,150 @@ export class TelegramModerationBotService
     } else if (command === '/queue') {
       await this.sendPendingQueue();
     }
+  }
+
+  private panelNavigation(reply: PanelReply): {
+    inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+  } {
+    const rows = [...(reply.keyboard?.inline_keyboard ?? [])];
+    if (!reply.editMessageId) {
+      rows.push([
+        { text: 'Отмена', callback_data: 'ui:cancel' },
+        { text: 'Главное меню', callback_data: 'ui:home' },
+      ]);
+    }
+    return { inline_keyboard: rows };
+  }
+
+  private async processPanelDelegation(
+    update: TelegramUpdate,
+    delegate: PanelDelegate,
+  ): Promise<PanelReply> {
+    const callback = asRecord(update.callback_query);
+    const source = callback
+      ? asRecord(callback.message)
+      : asRecord(update.message);
+    const chat = asRecord(source?.chat);
+    const from = callback ? asRecord(callback.from) : asRecord(source?.from);
+    const chatId = idString(chat?.id) ?? '';
+    if (delegate.kind === 'PAIR_CODE') {
+      let code: string;
+      try {
+        code = await this.ownerPairing.createCode(chatId);
+      } catch {
+        await this.markUpdateProcessed(update.update_id as number);
+        return {
+          chatId,
+          text: 'Не удалось подготовить код. Обновите меню и попробуйте ещё раз.',
+        };
+      }
+      await this.markUpdateProcessed(update.update_id as number);
+      return {
+        chatId,
+        text: `Одноразовый код: ${code}\nОткройте колокольчик в OnMap на своём телефоне → «Привязать для теста» и введите код. Он действует 10 минут и только один раз.`,
+      };
+    }
+    if (delegate.kind === 'PAIR_BY_PUSH') {
+      let result: 'SENT' | 'UNAVAILABLE' | 'RETRY';
+      try {
+        result = await this.ownerPairing.sendTelegramChallenge(chatId);
+      } catch {
+        await this.markUpdateProcessed(update.update_id as number);
+        return {
+          chatId,
+          text: 'Не удалось отправить код: нужен ровно один активный iPhone с разрешёнными предложениями. Массовая рассылка не запускалась.',
+        };
+      }
+      await this.markUpdateProcessed(update.update_id as number);
+      return {
+        chatId,
+        text:
+          result === 'SENT'
+            ? 'Код принят APNs для единственного подходящего iPhone. В течение 10 минут пришлите сюда код из уведомления. Принятие APNs не гарантирует появления на экране.'
+            : 'Код не принят APNs. Привязка не выполнена; вернитесь в настройки и попробуйте позже.',
+      };
+    }
+    if (delegate.kind === 'PAIR_CONFIRM') {
+      try {
+        await this.ownerPairing.confirmTelegramChallenge(chatId, delegate.code);
+        return {
+          chatId,
+          text: 'iPhone привязан для адресного теста. Общая рассылка не запускалась.',
+        };
+      } catch {
+        return {
+          chatId,
+          text: 'Код неверен или истёк. Проверьте уведомление; после пяти ошибок потребуется подождать час.',
+        };
+      }
+    }
+    if (delegate.kind === 'TEST_PUSH') {
+      let result: 'SENT' | 'UNAVAILABLE' | 'RETRY';
+      try {
+        result = await this.ownerPairing.sendCampaignTest(
+          chatId,
+          delegate.campaignId,
+        );
+      } catch {
+        await this.markUpdateProcessed(update.update_id as number);
+        return {
+          chatId,
+          text: 'Адресный тест не отправлен. Проверьте привязку телефона и настройки уведомлений; массовая кампания не запускалась.',
+        };
+      }
+      await this.markUpdateProcessed(update.update_id as number);
+      return {
+        chatId,
+        text:
+          result === 'SENT'
+            ? 'Тестовое уведомление принято провайдером для единственного привязанного устройства. Появление на экране проверьте на телефоне.'
+            : 'Тест не доставлен провайдером. Проверьте привязку и настройки push; массовая кампания не запускалась.',
+      };
+    }
+    if (delegate.kind === 'MODERATION') {
+      const delegated = {
+        ...update,
+        callback_query: { ...callback, data: delegate.callbackData },
+      };
+      if (!isAuthorizedModerationUpdate(delegated, this.ownerChatId)) {
+        await this.markUpdateProcessed(update.update_id as number);
+        return { chatId, callbackText: 'Нет прав' };
+      }
+      const action = parseModerationCallback(
+        delegate.callbackData,
+        this.restrictionHours,
+      );
+      const outcome = await this.processCallbackUpdate(
+        update.update_id as number,
+        action,
+        asRecord(delegated.callback_query) ?? {},
+      );
+      if (outcome.status === 'RESTORED' && outcome.event)
+        this.gateway.broadcastUpdated(this.toRealtimeEvent(outcome.event));
+      if (outcome.status === 'EXPIRED' && outcome.event)
+        this.gateway.broadcastResolved({
+          id: outcome.event.id,
+          cityId: outcome.event.cityId,
+          resolvedAt: new Date().toISOString(),
+        });
+      return {
+        chatId,
+        callbackText: this.callbackStatusText(outcome.status),
+        text: `Результат: ${this.callbackStatusText(outcome.status)}. Откройте очередь для обновления.`,
+      };
+    }
+    const delegatedUpdate = {
+      update_id: update.update_id,
+      message: {
+        ...source,
+        from,
+        chat,
+        text: delegate.command,
+      },
+    };
+    return delegate.kind === 'PARTNER'
+      ? this.partnerBot.process(delegatedUpdate)
+      : this.pushCampaignBot.process(delegatedUpdate);
   }
 
   private async markUpdateProcessed(updateId: number): Promise<boolean> {
@@ -521,6 +747,21 @@ export class TelegramModerationBotService
         return { status: 'RESTORED', event: restored };
       }
 
+      if (action.kind === 'CLOSE_HIDDEN') {
+        await tx.$executeRaw`
+          UPDATE road_event_moderation_cases SET state = 'CLOSED_HIDDEN',
+            decision_at = ${now}, moderator_telegram_id = ${moderatorId}, updated_at = ${now}
+          WHERE road_event_id = ${action.eventId}::uuid AND state = 'PENDING_REVIEW'
+        `;
+        await tx.$executeRaw`
+          INSERT INTO road_event_moderation_audit
+            (id, road_event_id, moderator_telegram_id, decision, telegram_update_id)
+          VALUES (${randomUUID()}::uuid, ${action.eventId}::uuid, ${moderatorId}, 'CLOSED_HIDDEN', ${BigInt(updateId)})
+          ON CONFLICT (telegram_update_id) DO NOTHING
+        `;
+        return { status: 'CLOSED_HIDDEN', event };
+      }
+
       if (!event.createdByActorId)
         return { status: 'AUTHOR_UNAVAILABLE', event };
       const blockedUntil = new Date(now.getTime() + action.hours * 60 * 60_000);
@@ -572,20 +813,26 @@ export class TelegramModerationBotService
       return;
     }
     if (
-      !['RESTORED', 'RESTRICTED', 'EXPIRED', 'AUTHOR_UNAVAILABLE'].includes(
-        outcome.status,
-      )
+      ![
+        'RESTORED',
+        'CLOSED_HIDDEN',
+        'RESTRICTED',
+        'EXPIRED',
+        'AUTHOR_UNAVAILABLE',
+      ].includes(outcome.status)
     )
       return;
 
     const suffix =
       outcome.status === 'RESTORED'
         ? 'Статус рассмотрения: метка восстановлена.'
-        : outcome.status === 'RESTRICTED'
-          ? `Статус рассмотрения: автор ограничен на ${action.kind === 'RESTRICT' ? this.durationLabel(action.hours) : ''}.`
-          : outcome.status === 'AUTHOR_UNAVAILABLE'
-            ? 'Статус рассмотрения: ограничение невозможно — автор не связан с identity.'
-            : 'Статус рассмотрения: событие истекло и осталось завершённым.';
+        : outcome.status === 'CLOSED_HIDDEN'
+          ? 'Дело закрыто без ограничения автора. Метка остаётся скрытой до исходного срока.'
+          : outcome.status === 'RESTRICTED'
+            ? `Статус рассмотрения: автор ограничен на ${action.kind === 'RESTRICT' ? this.durationLabel(action.hours) : ''}.`
+            : outcome.status === 'AUTHOR_UNAVAILABLE'
+              ? 'Статус рассмотрения: ограничение невозможно — автор не связан с identity.'
+              : 'Статус рассмотрения: событие истекло и осталось завершённым.';
     await this.safeApiCall('editMessageText', {
       chat_id: message.chatId,
       message_id: message.messageId,
@@ -615,6 +862,7 @@ export class TelegramModerationBotService
       NO_CASE: 'Дело не найдено',
       ALREADY_DECIDED: 'Решение уже принято',
       RESTORED: 'Метка восстановлена',
+      CLOSED_HIDDEN: 'Дело закрыто; метка скрыта до истечения',
       RESTRICTED: 'Ограничение установлено',
       EXPIRED: 'Событие истекло, восстановление невозможно',
       AUTHOR_UNAVAILABLE: 'Identity автора недоступна',

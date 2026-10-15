@@ -81,6 +81,12 @@ const createHarness = () => {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
     },
+    partnerPointContact: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      update: jest.fn().mockResolvedValue({}),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     partnerImageAsset: {
       create: jest.fn().mockResolvedValue({}),
       findUnique: jest.fn().mockResolvedValue({ key: 'present' }),
@@ -130,10 +136,74 @@ const createHarness = () => {
     createdPoints,
     banners,
     getDraft: () => draft,
+    setDraft: (value: NonNullable<typeof draft>) => {
+      draft = value;
+    },
   };
 };
 
 describe('partner bot owner access', () => {
+  it('selects placement start with inline local date and time buttons', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-15T08:00:00.000Z'));
+    try {
+      const harness = createHarness();
+      harness.setDraft({
+        ownerTelegramId: String(OWNER),
+        kind: 'POINT',
+        step: 'STARTS_AT',
+        revision: 2,
+        payload: { cityId: 'balakovo', contacts: [] },
+      });
+      await harness.service().process(callback(1001, 'pp:date:day1:2'));
+      await harness.service().process(callback(1002, 'pp:date:hour12:3'));
+      await harness.service().process(callback(1003, 'pp:date:minute30:4'));
+      expect(harness.getDraft()).toMatchObject({
+        step: 'ENDS_AT',
+        payload: { startsAt: '2026-10-16T08:30:00.000Z' },
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('reorders contacts without changing their stable IDs', async () => {
+    const harness = createHarness();
+    harness.setDraft({
+      ownerTelegramId: String(OWNER),
+      kind: 'POINT',
+      step: 'CONTACT_CHOICE',
+      revision: 3,
+      payload: {
+        cityId: 'balakovo',
+        contacts: [
+          {
+            id: 'first-id',
+            type: 'PHONE',
+            label: 'Телефон',
+            value: '111',
+            displayOrder: 0,
+          },
+          {
+            id: 'second-id',
+            type: 'PHONE',
+            label: 'Другой телефон',
+            value: '222',
+            displayOrder: 1,
+          },
+        ],
+      },
+    });
+    await harness.service().process(callback(999, 'pp:contact:down:0:3'));
+    expect(
+      (
+        harness.getDraft()?.payload as {
+          contacts: Array<{ id: string; displayOrder: number }>;
+        }
+      ).contacts,
+    ).toEqual([
+      expect.objectContaining({ id: 'second-id', displayOrder: 0 }),
+      expect.objectContaining({ id: 'first-id', displayOrder: 1 }),
+    ]);
+  });
   it('requires a separate owner callback before partner push is queued', async () => {
     const previous = process.env.PUSH_ENQUEUE_ENABLED;
     process.env.PUSH_ENQUEUE_ENABLED = 'true';
@@ -186,14 +256,30 @@ describe('partner bot owner access', () => {
       contacts: [{ id: 'contact-uuid', label: 'Позвонить', type: 'PHONE' }],
     });
     harness.tx.partnerStatDaily.groupBy.mockResolvedValue([
-      { action: 'POINT_OPEN', detailId: '', _sum: { count: 4 } },
-      { action: 'CONTACT_CLICK', detailId: 'contact-uuid', _sum: { count: 2 } },
+      {
+        action: 'POINT_OPEN',
+        detailId: '',
+        day: new Date(),
+        _sum: { count: 4 },
+      },
+      {
+        action: 'CONTACT_CLICK',
+        detailId: 'contact-uuid',
+        day: new Date(),
+        _sum: { count: 2 },
+      },
       {
         action: 'BANNER_IMPRESSION',
         detailId: 'banner-uuid',
+        day: new Date(),
         _sum: { count: 3 },
       },
-      { action: 'BANNER_CLICK', detailId: 'banner-uuid', _sum: { count: 1 } },
+      {
+        action: 'BANNER_CLICK',
+        detailId: 'banner-uuid',
+        day: new Date(),
+        _sum: { count: 1 },
+      },
     ]);
     const bot = harness.service();
     expect(
@@ -205,14 +291,12 @@ describe('partner bot owner access', () => {
     const response = await bot.process(
       message(3, `/partner_stats ${POINT_ID}`),
     );
-    expect(response.text).toContain(
-      '7 дней: карточка 4, контакты 2, баннер 3 показов / 1 нажатий',
-    );
-    expect(response.text).toContain('30 дней:');
-    expect(response.text).toContain('Всё время:');
-    expect(response.text).toContain('Позвонить (PHONE): 2');
+    expect(response.text).toContain('7 дней\nОткрытия карточки: 4');
+    expect(response.text).toContain('30 дней\nОткрытия карточки: 4');
+    expect(response.text).toContain('Всё время\nОткрытия карточки: 4');
+    expect(response.text).toContain('Позвонить: 2');
     expect(response.text).not.toMatch(/actor|token|\+7/i);
-    expect(harness.tx.partnerStatDaily.groupBy).toHaveBeenCalledTimes(3);
+    expect(harness.tx.partnerStatDaily.groupBy).toHaveBeenCalledTimes(1);
     expect(
       await bot.process(message(3, `/partner_stats ${POINT_ID}`)),
     ).toMatchObject({ duplicate: true });
@@ -544,6 +628,45 @@ describe('partner bot persisted workflow and idempotence', () => {
     });
     expect(harness.tx.partnerPoint.updateMany).not.toHaveBeenCalled();
     expect(harness.tx.partnerPoint.update).not.toHaveBeenCalled();
+  });
+
+  it('lets the owner select the linked banner point with a short callback', async () => {
+    const harness = createHarness();
+    const bot = harness.service();
+    harness.tx.partnerPoint.findMany.mockResolvedValue([
+      { id: POINT_ID, title: 'Партнёрская точка' },
+    ]);
+    await bot.process(message(560, '/partner_banner balakovo'));
+    for (const [index, value] of [
+      'Заголовок',
+      'Текст',
+      'Подробнее',
+      'https://example.com',
+    ].entries())
+      await bot.process(message(561 + index, value));
+    const revision = harness.getDraft()!.revision;
+    const response = await bot.process(callback(565, `pp:bp:0:${revision}`));
+    expect(response.text).toContain('Начало баннера');
+    expect(harness.getDraft()?.payload).toMatchObject({
+      partnerPointId: POINT_ID,
+    });
+    expect(Buffer.byteLength(`pp:bp:0:${revision}`)).toBeLessThanOrEqual(64);
+  });
+
+  it('ends a banner without changing its linked point', async () => {
+    const harness = createHarness();
+    const bot = harness.service();
+    const response = await bot.process(
+      message(570, '/partner_banner_end balakovo'),
+    );
+    expect(response.text).toContain('Баннер завершён');
+    const bannerUpdates = harness.tx.partnerCityBanner.updateMany.mock
+      .calls as unknown as Array<Array<unknown>>;
+    expect(bannerUpdates[0]?.[0]).toMatchObject({
+      where: { cityId: 'balakovo' },
+      data: { enabled: false },
+    });
+    expect(harness.tx.partnerPoint.updateMany).not.toHaveBeenCalled();
   });
 
   it('stages edits without changing the point before confirmation and keeps financial commands private', async () => {

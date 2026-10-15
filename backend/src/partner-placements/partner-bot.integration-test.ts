@@ -11,10 +11,14 @@ import { RoadEventsGateway } from '../road-events/realtime/road-events.gateway';
 import { TelegramModerationBotService } from '../integrations/telegram/moderation/telegram-moderation-bot.service';
 import { TelegramSingletonLockService } from '../integrations/telegram/telegram-singleton-lock.service';
 import { PartnerBotService } from './partner-bot.service';
+import type { PushCampaignBotService } from '../push/push-campaign-bot.service';
+import type { TelegramOwnerPanelService } from '../integrations/telegram/moderation/telegram-owner-panel.service';
+import type { PushOwnerPairingService } from '../push/push-owner-pairing.service';
 import { PartnerPlacementsController } from './partner-placements.controller';
 import { PartnerPlacementsService } from './partner-placements.service';
 import { PartnerStatisticsService } from './partner-statistics.service';
 import { IdentityService } from '../identity/identity.service';
+import { IdentityTrackingService } from '../identity/identity-tracking.service';
 import { AnonymousIdentityGuard } from '../identity/anonymous-identity.guard';
 
 const dbUrl = process.env.PARTNER_INTEGRATION_DATABASE_URL;
@@ -172,6 +176,19 @@ const privateCallback = (updateId: number, data: string) => ({
           release: jest.fn(),
         } as unknown as TelegramSingletonLockService,
         partnerBot,
+        {
+          shouldHandle: jest.fn().mockResolvedValue(false),
+          process: jest.fn(),
+        } as unknown as PushCampaignBotService,
+        {
+          shouldHandle: jest.fn().mockReturnValue(false),
+          shouldHandleSearchText: jest.fn().mockResolvedValue(false),
+          process: jest.fn(),
+        } as unknown as TelegramOwnerPanelService,
+        {
+          createCode: jest.fn(),
+          sendCampaignTest: jest.fn(),
+        } as unknown as PushOwnerPairingService,
       );
       (moderation as unknown as { safeApiCall: typeof transport }).safeApiCall =
         transport;
@@ -188,6 +205,10 @@ const privateCallback = (updateId: number, data: string) => ({
               partnerStatisticsPseudonym: () => 'integration-only',
               verifyAnonymousIdentity: () => 'integration-only',
             },
+          },
+          {
+            provide: IdentityTrackingService,
+            useValue: { recordSafely: jest.fn().mockResolvedValue(undefined) },
           },
           AnonymousIdentityGuard,
           PartnerStatisticsService,
@@ -257,6 +278,7 @@ const privateCallback = (updateId: number, data: string) => ({
       await send('#FDFBF4');
       await send('/skip');
       await send('onMap-2026');
+      await send('/skip'); // optional promo terms
       expect((await list()).points).toHaveLength(0);
       const confirmationData = `pp:confirm:${await draftRevision()}`;
       const confirmUpdate = privateCallback(nextUpdateId++, confirmationData);
@@ -322,6 +344,7 @@ const privateCallback = (updateId: number, data: string) => ({
       const update = privateMessage(nextUpdateId++, '');
       await partnerBot.process(update, { bytes: source });
       await send('/skip');
+      await send('/skip'); // existing promo code has optional terms
       expect(
         (await partnerBot.process(update, { bytes: source })).duplicate,
       ).toBe(true);
@@ -356,6 +379,7 @@ const privateCallback = (updateId: number, data: string) => ({
       ).toBe(key);
       await send('/skip');
       await send('/skip');
+      await send('/skip'); // existing promo code has optional terms
       await click(`pp:confirm:${await draftRevision()}`);
       expect(
         (
@@ -391,6 +415,7 @@ const privateCallback = (updateId: number, data: string) => ({
       await reachPromo();
       expect((await list()).points[0].promoCode).toBe('onMap-2026');
       await send('Sale_20');
+      await send('/skip'); // keep optional terms unchanged
       expect((await list()).points[0].promoCode).toBe('onMap-2026');
       await click(`pp:confirm:${await draftRevision()}`);
       expect((await list()).points[0].promoCode).toBe('Sale_20');
@@ -450,6 +475,36 @@ const privateCallback = (updateId: number, data: string) => ({
         backgroundColor: '#F7F4EA',
         textColor: '#14241E',
       });
+      await send('/partner_banner_off balakovo');
+      expect((await list()).banner).toBeNull();
+      await send('/partner_banner_quick balakovo text');
+      await send('Updated banner');
+      await send('New offer');
+      await click(`pp:confirm:${await draftRevision()}`);
+      expect((await list()).banner).toBeNull();
+      expect(
+        (
+          await prisma.partnerCityBanner.findUniqueOrThrow({
+            where: { cityId: 'balakovo' },
+          })
+        ).title,
+      ).toBe('Updated banner');
+      await send('/partner_banner_enable balakovo');
+      expect((await list()).banner?.title).toBe('Updated banner');
+      await send('/partner_banner_quick balakovo action');
+      await send('See details');
+      await send('https://example.org');
+      await click(`pp:confirm:${await draftRevision()}`);
+      expect(
+        ((await list()).banner?.button as { label: string } | undefined)?.label,
+      ).toBe('See details');
+      await send('/partner_banner_quick balakovo period');
+      await send('/keep');
+      await send(new Date(Date.now() + 40 * 60_000).toISOString());
+      await click(`pp:confirm:${await draftRevision()}`);
+      expect(
+        ((await list()).banner?.button as { label: string } | undefined)?.label,
+      ).toBe('See details');
       expect(
         (
           await prisma.partnerPoint.findUniqueOrThrow({

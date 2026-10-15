@@ -138,6 +138,7 @@ export class PartnerPlacementsService {
             ? `/partner-placements/images/${point.imageAssetKey}`
             : null,
         promoCode: point.promoCode,
+        promoTerms: point.promoCode ? point.promoTerms : null,
         contacts: point.contacts.map((contact) => ({
           id: contact.id,
           type: contact.type,

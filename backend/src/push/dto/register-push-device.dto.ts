@@ -1,4 +1,12 @@
-import { IsEnum, IsString, IsUUID, Length, Matches } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+} from 'class-validator';
 
 export enum PushClientPlatform {
   IOS = 'IOS',
@@ -28,4 +36,12 @@ export class RegisterPushDeviceDto {
   @Length(20, 512)
   @Matches(/^[A-Za-z0-9_:.-]+$/u)
   token!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  roadPushEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  newsPushEnabled?: boolean;
 }

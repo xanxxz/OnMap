@@ -16,6 +16,8 @@ import { safePartnerAppearance } from './partner-placement-colors';
 import { normalizePartnerImage, PartnerImageError } from './partner-image';
 import { queuePartnerPush } from '../push/push-queue';
 import { PARTNER_PUSH_MIN_INTERVAL_MS } from '../push/push-policy';
+import { formatPartnerStatReport } from './partner-stat-report';
+import { cityLocalParts, cityLocalToUtc } from '../cities/city-local-time';
 
 type BotKeyboard = {
   inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
@@ -38,6 +40,88 @@ const numericId = (value: unknown): string | null =>
     : null;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+const localDay = (
+  cityId: string,
+  offset: number,
+  now = new Date(),
+): string | null => {
+  const timeZone = getCityConfig(cityId)?.timeZone;
+  if (!timeZone) return null;
+  const p = cityLocalParts(now, timeZone);
+  return new Date(Date.UTC(p.year, p.month - 1, p.day + offset))
+    .toISOString()
+    .slice(0, 10);
+};
+
+const dateKeyboardFor = (state: PartnerDraftState): BotKeyboard => {
+  const payload = state.payload;
+  const revision = state.revision;
+  const selected = payload.dateSelection;
+  const option = (text: string, action: string) => ({
+    text,
+    callback_data: `pp:date:${action}:${revision}`,
+  });
+  if (selected?.day && selected.hour !== undefined)
+    return {
+      inline_keyboard: [
+        [0, 15, 30, 45].map((minute) =>
+          option(`:${String(minute).padStart(2, '0')}`, `minute${minute}`),
+        ),
+        [option('← Часы', 'back')],
+        [option('Отмена', 'cancel')],
+      ],
+    };
+  if (selected?.day)
+    return {
+      inline_keyboard: [
+        ...Array.from({ length: 6 }, (_rowValue, rowIndex) =>
+          Array.from({ length: 4 }, (_columnValue, columnIndex) => {
+            const hour = rowIndex * 4 + columnIndex;
+            return option(`${String(hour).padStart(2, '0')}:00`, `hour${hour}`);
+          }),
+        ),
+        [option('← Дата', 'back')],
+        [option('Отмена', 'cancel')],
+      ],
+    };
+  if (selected?.page !== undefined) {
+    const first = selected.page * 7;
+    return {
+      inline_keyboard: [
+        ...Array.from({ length: 7 }, (_, index) => {
+          const offset = first + index;
+          return [
+            option(
+              localDay(payload.cityId, offset) ?? `День ${offset}`,
+              `day${offset}`,
+            ),
+          ];
+        }),
+        [
+          ...(selected.page > 0
+            ? [option('← Раньше', `page${selected.page - 1}`)]
+            : []),
+          ...(selected.page < 51
+            ? [option('Позже →', `page${selected.page + 1}`)]
+            : []),
+        ],
+        [option('Отмена', 'cancel')],
+      ],
+    };
+  }
+  return {
+    inline_keyboard: [
+      ...(state.step === 'STARTS_AT' ? [[option('Сейчас', 'now')]] : []),
+      [option('Сегодня', 'day0'), option('Завтра', 'day1')],
+      [option('Выбрать дату', 'page0')],
+      ...((state.step === 'STARTS_AT' ? payload.startsAt : payload.endsAt)
+        ? [[option('Оставить прежнее', 'keep')]]
+        : []),
+      [option('Отмена', 'cancel')],
+    ],
+  };
+};
 
 export const parsePartnerOwnerIds = (
   raw: string | undefined,
@@ -72,6 +156,8 @@ export const partnerUpdateOwner = (
 
 const keyboardFor = (state: PartnerDraftState): BotKeyboard | undefined => {
   const revision = state.revision;
+  if (state.step === 'STARTS_AT' || state.step === 'ENDS_AT')
+    return dateKeyboardFor(state);
   if (state.kind === 'POINT' && state.step === 'BACKGROUND_COLOR')
     return {
       inline_keyboard: [
@@ -103,11 +189,86 @@ const keyboardFor = (state: PartnerDraftState): BotKeyboard | undefined => {
   if (state.step === 'CONTACT_CHOICE')
     return {
       inline_keyboard: [
+        ...(state.kind === 'POINT'
+          ? (state.payload as PointDraft).contacts
+          : []
+        ).map((contact, index) => [
+          {
+            text: `${index + 1}. ${contact.label.slice(0, 28)} · изменить`,
+            callback_data: `pp:contact:edit:${index}:${revision}`,
+          },
+          {
+            text: 'Удалить',
+            callback_data: `pp:contact:ask:${index}:${revision}`,
+          },
+          {
+            text: '↑',
+            callback_data: `pp:contact:up:${index}:${revision}`,
+          },
+          {
+            text: '↓',
+            callback_data: `pp:contact:down:${index}:${revision}`,
+          },
+        ]),
         [{ text: 'Добавить контакт', callback_data: `pp:add:${revision}` }],
         [{ text: 'Готово', callback_data: `pp:done:${revision}` }],
         [{ text: 'Отмена', callback_data: `pp:cancel:${revision}` }],
       ],
     };
+  if (state.kind === 'POINT' && state.step === 'CONTACT_TYPE')
+    return {
+      inline_keyboard: [
+        ...(['PHONE', 'EMAIL', 'WEBSITE', 'TELEGRAM', 'OTHER'] as const).map(
+          (type) => [
+            {
+              text: (
+                {
+                  PHONE: 'Телефон',
+                  EMAIL: 'Почта',
+                  WEBSITE: 'Сайт',
+                  TELEGRAM: 'Telegram',
+                  OTHER: 'Другое / WhatsApp-ссылка',
+                } as const
+              )[type],
+              callback_data: `pp:ct:${type}:${revision}`,
+            },
+          ],
+        ),
+        [{ text: 'Отмена', callback_data: `pp:cancel:${revision}` }],
+      ],
+    };
+  if (state.kind === 'POINT' && state.step === 'COORDINATE')
+    return {
+      inline_keyboard: [
+        [
+          {
+            text: 'Отправить геопозицию Telegram',
+            callback_data: `pp:coord:location:${revision}`,
+          },
+        ],
+        [
+          {
+            text: 'Ввести координаты',
+            callback_data: `pp:coord:text:${revision}`,
+          },
+        ],
+        [{ text: 'Отмена', callback_data: `pp:cancel:${revision}` }],
+      ],
+    };
+  if (state.kind === 'BANNER' && state.step === 'POINT_ID') {
+    const choices = (state.payload as BannerDraft).pointChoices ?? [];
+    return {
+      inline_keyboard: [
+        ...choices.map((point, index) => [
+          {
+            text: point.title.slice(0, 45),
+            callback_data: `pp:bp:${index}:${revision}`,
+          },
+        ]),
+        [{ text: 'Отмена', callback_data: `pp:cancel:${revision}` }],
+      ],
+    };
+  }
   if (state.step === 'PREVIEW')
     return {
       inline_keyboard: [
@@ -118,6 +279,22 @@ const keyboardFor = (state: PartnerDraftState): BotKeyboard | undefined => {
             callback_data: `pp:confirm:${revision}`,
           },
         ],
+        ...(state.kind === 'POINT'
+          ? [
+              [
+                {
+                  text: 'Изменить поле',
+                  callback_data: `pp:fields:${revision}`,
+                },
+              ],
+              [
+                {
+                  text: 'Сохранить как черновик',
+                  callback_data: `pp:save:${revision}`,
+                },
+              ],
+            ]
+          : []),
         [{ text: 'Отмена', callback_data: `pp:cancel:${revision}` }],
       ],
     };
@@ -178,7 +355,7 @@ export class PartnerBotService {
     if (/^\/partner(?:_|\s|$)/iu.test(text)) return true;
     if (
       text.startsWith('/') &&
-      !/^\/(?:skip|keep|done|add_contact|clear_contacts|clear_promo)(?:\s|$)/iu.test(
+      !/^\/(?:skip|keep|done|add_contact|clear_contacts|clear_promo|clear_terms)(?:\s|$)/iu.test(
         text,
       )
     )
@@ -244,6 +421,22 @@ export class PartnerBotService {
         where: { ownerTelegramId: ownerId },
       });
       const state = row ? draftFromRow(row) : null;
+      if (
+        row?.updatedAt &&
+        row.updatedAt.getTime() < Date.now() - 24 * 60 * 60_000
+      ) {
+        if (state) await this.deletePendingImage(tx, state);
+        await tx.partnerBotDraft.delete({
+          where: { ownerTelegramId: ownerId },
+        });
+        await tx.telegramModerationUpdate.create({
+          data: { updateId: BigInt(updateId) },
+        });
+        return {
+          chatId: ownerId,
+          text: 'Незавершённый мастер истёк через 24 часа. Откройте меню и начните заново.',
+        };
+      }
       let reply: PartnerBotReply;
       if (callback) {
         reply = await this.processCallback(
@@ -269,7 +462,7 @@ export class PartnerBotService {
               await this.deletePendingImage(tx, state);
               const updated: PartnerDraftState = {
                 ...state,
-                step: 'PROMO_CODE',
+                step: previous.quickEdit === 'IMAGE' ? 'PREVIEW' : 'PROMO_CODE',
                 revision: state.revision + 1,
                 payload: { ...previous, imageAssetKey: key },
               };
@@ -344,9 +537,12 @@ export class PartnerBotService {
     ownerId: string,
     state: PartnerDraftState,
   ): PartnerBotReply {
+    const timeZone = getCityConfig(state.payload.cityId)?.timeZone;
+    const dateStep = state.step === 'STARTS_AT' || state.step === 'ENDS_AT';
+    const selection = state.payload.dateSelection;
     return {
       chatId: ownerId,
-      text: partnerDraftPrompt(state),
+      text: `${partnerDraftPrompt(state)}${dateStep ? `\nЧасовой пояс: ${timeZone ?? 'не задан'}.${selection?.day ? ` Дата: ${selection.day}${selection.hour !== undefined ? `, час ${selection.hour}:00` : ''}.` : ''}` : ''}`,
       keyboard: keyboardFor(state),
       callbackText: 'Готово',
     };
@@ -447,7 +643,12 @@ export class PartnerBotService {
       await this.saveDraft(tx, ownerId, draft);
       return this.draftReply(ownerId, draft);
     }
-    if (command === '/partner_edit') {
+    if (
+      command === '/partner_edit' ||
+      command === '/partner_image' ||
+      command === '/partner_promo' ||
+      command === '/partner_contacts'
+    ) {
       const id = args[0];
       if (!id || !UUID.test(id)) return respond('Укажите UUID точки.');
       const point = await tx.partnerPoint.findUnique({
@@ -458,11 +659,25 @@ export class PartnerBotService {
         return respond('Точка не найдена или размещение завершено.');
       const draft: PartnerDraftState = {
         kind: 'POINT',
-        step: 'TITLE',
+        step:
+          command === '/partner_image'
+            ? 'IMAGE'
+            : command === '/partner_promo'
+              ? 'PROMO_CODE'
+              : command === '/partner_contacts'
+                ? 'CONTACT_CHOICE'
+                : 'TITLE',
         revision: 0,
         payload: {
           cityId: point.cityId,
           editingId: point.id,
+          ...(command === '/partner_image'
+            ? { quickEdit: 'IMAGE' as const }
+            : command === '/partner_promo'
+              ? { quickEdit: 'PROMO' as const }
+              : command === '/partner_contacts'
+                ? { quickEdit: 'CONTACTS' as const }
+                : {}),
           title: point.title,
           category: point.category,
           backgroundColor: point.backgroundColor,
@@ -470,11 +685,13 @@ export class PartnerBotService {
           imageAssetKey: point.imageAssetKey,
           originalImageAssetKey: point.imageAssetKey,
           promoCode: point.promoCode,
+          promoTerms: point.promoTerms,
           description: point.description,
           latitude: point.latitude ?? undefined,
           longitude: point.longitude ?? undefined,
           displayAddress: point.displayAddress,
           contacts: point.contacts.map((contact) => ({
+            id: contact.id,
             type: contact.type,
             label: contact.label,
             value: contact.value,
@@ -501,7 +718,10 @@ export class PartnerBotService {
       return respond(
         points.length
           ? points
-              .map((point) => `${point.id} · ${point.title} · ${point.status}`)
+              .map(
+                (point) =>
+                  `${point.id} · ${point.title} · ${{ DRAFT: 'черновик', ACTIVE: 'активно', PAUSED: 'на паузе', ENDED: 'завершено' }[point.status]}`,
+              )
               .join('\n')
           : 'Точек нет.',
       );
@@ -519,68 +739,46 @@ export class PartnerBotService {
         },
       });
       if (!point) return respond('Точка не найдена.');
-      const contactLabels = new Map(
-        point.contacts.map((contact) => [
-          contact.id,
-          `${contact.label} (${contact.type})`,
-        ]),
+      const rows = await tx.partnerStatDaily.groupBy({
+        by: ['action', 'detailId', 'day'],
+        where: { partnerPointId: id },
+        _sum: { count: true },
+      });
+      const now = new Date();
+      const contacts = point.contacts.map((contact) => ({
+        id: contact.id,
+        label: contact.label,
+      }));
+      const periods = (['7', '30', 'ALL'] as const).map(
+        (period) =>
+          `${period === 'ALL' ? 'Всё время' : `${period} дней`}\n${formatPartnerStatReport(rows, contacts, period, now)}`,
       );
-      const today = new Date();
-      const start = (days: number) =>
-        new Date(
-          Date.UTC(
-            today.getUTCFullYear(),
-            today.getUTCMonth(),
-            today.getUTCDate() - days + 1,
-          ),
-        );
-      const periods = await Promise.all(
-        [
-          { label: '7 дней', since: start(7) },
-          { label: '30 дней', since: start(30) },
-          { label: 'Всё время', since: null },
-        ].map(async (period) => {
-          const rows = await tx.partnerStatDaily.groupBy({
-            by: ['action', 'detailId'],
-            where: {
-              partnerPointId: id,
-              ...(period.since ? { day: { gte: period.since } } : {}),
-            },
-            _sum: { count: true },
-          });
-          const count = (action: string) =>
-            rows
-              .filter((row) => row.action === action)
-              .reduce((sum, row) => sum + (row._sum.count ?? 0), 0);
-          const contacts = rows
-            .filter((row) => row.action === 'CONTACT_CLICK')
-            .sort((a, b) => (b._sum.count ?? 0) - (a._sum.count ?? 0))
-            .slice(0, 8)
-            .map(
-              (row) =>
-                `${contactLabels.get(row.detailId) ?? `удалённый контакт ${row.detailId.slice(0, 8)}`}: ${row._sum.count ?? 0}`,
-            );
-          return `${period.label}: карточка ${count('POINT_OPEN')}, контакты ${count('CONTACT_CLICK')}, баннер ${count('BANNER_IMPRESSION')} показов / ${count('BANNER_CLICK')} нажатий${contacts.length ? `\nКонтакты: ${contacts.join(', ')}` : ''}`;
-        }),
-      );
-      return respond(`Статистика «${point.title}»\n${periods.join('\n')}`);
+      return respond(`Статистика «${point.title}»\n${periods.join('\n\n')}`);
     }
     if (command === '/partner_banner') {
       const cityId = args[0];
       if (!cityId || !getCityConfig(cityId))
         return respond('Укажите поддерживаемый cityId.');
       const old = await tx.partnerCityBanner.findUnique({ where: { cityId } });
+      const availablePoints = await tx.partnerPoint.findMany({
+        where: { cityId, status: 'ACTIVE', endsAt: { gt: new Date() } },
+        orderBy: { title: 'asc' },
+        take: 40,
+        select: { id: true, title: true },
+      });
       const draft: PartnerDraftState = {
         kind: 'BANNER',
         step: 'TITLE',
         revision: 0,
         payload: {
           cityId,
+          preserveEnabled: old?.enabled,
           title: old?.title ?? undefined,
           text: old?.text ?? undefined,
           buttonLabel: old?.buttonLabel ?? undefined,
           buttonUrl: old?.buttonUrl ?? undefined,
           partnerPointId: old?.partnerPointId ?? undefined,
+          pointChoices: availablePoints,
           startsAt: old?.startsAt?.toISOString(),
           endsAt: old?.endsAt?.toISOString(),
         } satisfies BannerDraft,
@@ -588,6 +786,77 @@ export class PartnerBotService {
       await this.deletePendingImage(tx, state);
       await this.saveDraft(tx, ownerId, draft);
       return this.draftReply(ownerId, draft);
+    }
+    if (command === '/partner_banner_quick') {
+      const [cityId, field] = args;
+      if (!cityId || !getCityConfig(cityId))
+        return respond('Укажите поддерживаемый cityId.');
+      const old = await tx.partnerCityBanner.findUnique({ where: { cityId } });
+      if (!old) return respond('Сначала создайте баннер.');
+      const steps = {
+        text: ['TITLE', 'TEXT'],
+        action: ['BUTTON_LABEL', 'BUTTON_URL'],
+        period: ['STARTS_AT', 'ENDS_AT'],
+      } as const;
+      const selected = steps[field as keyof typeof steps];
+      if (!selected) return respond('Выберите поле баннера.');
+      const draft: PartnerDraftState = {
+        kind: 'BANNER',
+        step: selected[0],
+        revision: 0,
+        payload: {
+          cityId,
+          preserveEnabled: old.enabled,
+          quickEditEndStep: selected[1],
+          title: old.title ?? undefined,
+          text: old.text ?? undefined,
+          buttonLabel: old.buttonLabel ?? undefined,
+          buttonUrl: old.buttonUrl ?? undefined,
+          partnerPointId: old.partnerPointId ?? undefined,
+          startsAt: old.startsAt?.toISOString(),
+          endsAt: old.endsAt?.toISOString(),
+        } satisfies BannerDraft,
+      };
+      await this.deletePendingImage(tx, state);
+      await this.saveDraft(tx, ownerId, draft);
+      return this.draftReply(ownerId, draft);
+    }
+    if (command === '/partner_banner_enable') {
+      const cityId = args[0];
+      if (!cityId || !getCityConfig(cityId))
+        return respond('Укажите поддерживаемый cityId.');
+      const now = new Date();
+      const banner = await tx.partnerCityBanner.findUnique({
+        where: { cityId },
+      });
+      const point = banner?.partnerPointId
+        ? await tx.partnerPoint.findUnique({
+            where: { id: banner.partnerPointId },
+          })
+        : null;
+      if (
+        !banner?.title ||
+        !banner.text ||
+        !banner.buttonLabel ||
+        !banner.buttonUrl ||
+        !banner.startsAt ||
+        !banner.endsAt ||
+        banner.startsAt > now ||
+        banner.endsAt <= now ||
+        !point ||
+        point.cityId !== cityId ||
+        point.status !== 'ACTIVE' ||
+        point.startsAt > now ||
+        point.endsAt <= now
+      )
+        return respond(
+          'Баннер или связанная точка сейчас недоступны. Проверьте срок и статус.',
+        );
+      const changed = await tx.partnerCityBanner.updateMany({
+        where: { cityId, enabled: false },
+        data: { enabled: true },
+      });
+      return respond(changed.count ? 'Баннер включён.' : 'Баннер уже включён.');
     }
     if (command === '/partner_banner_off') {
       const cityId = args[0];
@@ -601,6 +870,20 @@ export class PartnerBotService {
         changed.count
           ? 'Баннер выключен.'
           : 'Баннер уже выключен или не найден.',
+      );
+    }
+    if (command === '/partner_banner_end') {
+      const cityId = args[0];
+      if (!cityId || !getCityConfig(cityId))
+        return respond('Укажите поддерживаемый cityId.');
+      const changed = await tx.partnerCityBanner.updateMany({
+        where: { cityId, endsAt: { gt: new Date() } },
+        data: { enabled: false, endsAt: new Date() },
+      });
+      return respond(
+        changed.count
+          ? 'Баннер завершён и выключен. Срок партнёрской точки не изменён.'
+          : 'Баннер уже завершён или не найден.',
       );
     }
     if (
@@ -707,6 +990,303 @@ export class PartnerBotService {
     state: PartnerDraftState | null,
     data: string,
   ): Promise<PartnerBotReply> {
+    const dateAction =
+      /^pp:date:(now|keep|cancel|back|day\d{1,3}|page\d{1,2}|hour\d{1,2}|minute(?:0|15|30|45)):(\d+)$/u.exec(
+        data,
+      );
+    if (dateAction) {
+      if (
+        !state ||
+        !['STARTS_AT', 'ENDS_AT'].includes(state.step) ||
+        Number(dateAction[2]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      if (dateAction[1] === 'cancel')
+        return this.processCallback(
+          tx,
+          ownerId,
+          state,
+          `pp:cancel:${state.revision}`,
+        );
+      const city = getCityConfig(state.payload.cityId);
+      if (!city?.timeZone)
+        return {
+          chatId: ownerId,
+          callbackText: 'Для города не задан часовой пояс',
+        };
+      const next = structuredClone(state);
+      const payload = next.payload;
+      const action = dateAction[1];
+      let dateValue: string | null = null;
+      if (action === 'now' && state.step === 'STARTS_AT')
+        dateValue = new Date().toISOString();
+      else if (action === 'keep') dateValue = '/keep';
+      else if (action.startsWith('page')) {
+        const page = Number(action.slice(4));
+        if (page > 51)
+          return { chatId: ownerId, callbackText: 'Дата недоступна' };
+        payload.dateSelection = { page };
+      } else if (action.startsWith('day')) {
+        const offset = Number(action.slice(3));
+        const day = offset < 365 ? localDay(payload.cityId, offset) : null;
+        if (!day) return { chatId: ownerId, callbackText: 'Дата недоступна' };
+        payload.dateSelection = { day };
+      } else if (action.startsWith('hour')) {
+        const hour = Number(action.slice(4));
+        if (!payload.dateSelection?.day || hour > 23)
+          return { chatId: ownerId, callbackText: 'Сначала выберите дату' };
+        payload.dateSelection.hour = hour;
+      } else if (action.startsWith('minute')) {
+        const minute = Number(action.slice(6));
+        const selected = payload.dateSelection;
+        if (!selected?.day || selected.hour === undefined)
+          return { chatId: ownerId, callbackText: 'Сначала выберите время' };
+        const [year, month, day] = selected.day.split('-').map(Number);
+        dateValue =
+          cityLocalToUtc(
+            { year, month, day, hour: selected.hour, minute },
+            city.timeZone,
+          )?.toISOString() ?? null;
+        if (!dateValue)
+          return {
+            chatId: ownerId,
+            callbackText: 'Это местное время недоступно. Выберите другое',
+          };
+      } else if (action === 'back') {
+        if (payload.dateSelection?.hour !== undefined)
+          delete payload.dateSelection.hour;
+        else payload.dateSelection = { page: 0 };
+      } else return { chatId: ownerId, callbackText: 'Кнопка недействительна' };
+      if (dateValue !== null) {
+        const advanced = advancePartnerDraft(
+          state,
+          { text: dateValue },
+          new Date(),
+        );
+        if (advanced.error)
+          return { chatId: ownerId, callbackText: advanced.error };
+        await this.saveDraft(tx, ownerId, advanced.state);
+        return this.draftReply(ownerId, advanced.state);
+      }
+      next.revision += 1;
+      await this.saveDraft(tx, ownerId, next);
+      return this.draftReply(ownerId, next);
+    }
+    const bannerPoint = /^pp:bp:(\d+):(\d+)$/u.exec(data);
+    if (bannerPoint) {
+      if (
+        !state ||
+        state.kind !== 'BANNER' ||
+        state.step !== 'POINT_ID' ||
+        Number(bannerPoint[2]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      const choice = (state.payload as BannerDraft).pointChoices?.[
+        Number(bannerPoint[1])
+      ];
+      if (!choice) return { chatId: ownerId, callbackText: 'Точка недоступна' };
+      const advanced = advancePartnerDraft(
+        state,
+        { text: choice.id },
+        new Date(),
+      );
+      if (advanced.error)
+        return { chatId: ownerId, callbackText: advanced.error };
+      await this.saveDraft(tx, ownerId, advanced.state);
+      return this.draftReply(ownerId, advanced.state);
+    }
+    const fields = /^pp:fields:(\d+)$/u.exec(data);
+    if (fields) {
+      if (
+        !state ||
+        state.kind !== 'POINT' ||
+        state.step !== 'PREVIEW' ||
+        Number(fields[1]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      const choices = [
+        ['Название', 'TITLE'],
+        ['Категория', 'CATEGORY'],
+        ['Описание', 'DESCRIPTION'],
+        ['Координаты', 'COORDINATE'],
+        ['Адрес', 'ADDRESS'],
+        ['Контакты', 'CONTACT_CHOICE'],
+        ['Начало', 'STARTS_AT'],
+        ['Окончание', 'ENDS_AT'],
+        ['Цвета', 'BACKGROUND_COLOR'],
+        ['Изображение', 'IMAGE'],
+        ['Промокод', 'PROMO_CODE'],
+        ['Условия промокода', 'PROMO_TERMS'],
+      ] as const;
+      return {
+        chatId: ownerId,
+        text: 'Какое поле изменить? После ввода вернёмся к полному предпросмотру.',
+        keyboard: {
+          inline_keyboard: [
+            ...choices.map(([label, step]) => [
+              {
+                text: label,
+                callback_data: `pp:field:${step}:${state.revision}`,
+              },
+            ]),
+            [
+              {
+                text: 'Назад к предпросмотру',
+                callback_data: `pp:back:${state.revision}`,
+              },
+            ],
+          ],
+        },
+      };
+    }
+    const back = /^pp:back:(\d+)$/u.exec(data);
+    if (back) {
+      if (
+        !state ||
+        state.step !== 'PREVIEW' ||
+        Number(back[1]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      return this.draftReply(ownerId, state);
+    }
+    const field =
+      /^pp:field:(TITLE|CATEGORY|DESCRIPTION|COORDINATE|ADDRESS|CONTACT_CHOICE|STARTS_AT|ENDS_AT|BACKGROUND_COLOR|IMAGE|PROMO_CODE|PROMO_TERMS):(\d+)$/u.exec(
+        data,
+      );
+    if (field) {
+      if (
+        !state ||
+        state.kind !== 'POINT' ||
+        state.step !== 'PREVIEW' ||
+        Number(field[2]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      const step = field[1];
+      const quickEdit =
+        step === 'CONTACT_CHOICE'
+          ? 'CONTACTS'
+          : step === 'IMAGE'
+            ? 'IMAGE'
+            : step === 'PROMO_CODE'
+              ? 'PROMO'
+              : 'FIELD';
+      const next: PartnerDraftState = {
+        ...state,
+        step,
+        revision: state.revision + 1,
+        payload: {
+          ...(state.payload as PointDraft),
+          quickEdit,
+          ...(quickEdit === 'FIELD'
+            ? {
+                quickEditStep:
+                  step === 'BACKGROUND_COLOR' ? 'TEXT_COLOR' : step,
+              }
+            : {}),
+        },
+      };
+      await this.saveDraft(tx, ownerId, next);
+      return this.draftReply(ownerId, next);
+    }
+    const contactType =
+      /^pp:ct:(PHONE|EMAIL|WEBSITE|TELEGRAM|OTHER):(\d+)$/u.exec(data);
+    if (contactType) {
+      if (
+        !state ||
+        state.kind !== 'POINT' ||
+        state.step !== 'CONTACT_TYPE' ||
+        Number(contactType[2]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      const advanced = advancePartnerDraft(
+        state,
+        { text: contactType[1] },
+        new Date(),
+      );
+      if (advanced.error)
+        return { chatId: ownerId, callbackText: advanced.error };
+      await this.saveDraft(tx, ownerId, advanced.state);
+      return this.draftReply(ownerId, advanced.state);
+    }
+    const coordinate = /^pp:coord:(location|text):(\d+)$/u.exec(data);
+    if (coordinate) {
+      if (
+        !state ||
+        state.step !== 'COORDINATE' ||
+        Number(coordinate[2]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      return {
+        chatId: ownerId,
+        text:
+          coordinate[1] === 'location'
+            ? 'Пришлите геопозицию вложением Telegram. Точка не будет опубликована до подтверждения.'
+            : 'Введите координаты в формате «широта, долгота».',
+      };
+    }
+    const contactAction =
+      /^pp:contact:(edit|ask|drop|keep|up|down):(\d+):(\d+)$/u.exec(data);
+    if (contactAction) {
+      if (
+        !state ||
+        state.kind !== 'POINT' ||
+        state.step !== 'CONTACT_CHOICE' ||
+        Number(contactAction[3]) !== state.revision
+      )
+        return { chatId: ownerId, callbackText: 'Кнопка устарела' };
+      const index = Number(contactAction[2]);
+      const point = state.payload as PointDraft;
+      if (
+        !Number.isSafeInteger(index) ||
+        index < 0 ||
+        index >= point.contacts.length
+      )
+        return { chatId: ownerId, callbackText: 'Контакт изменился' };
+      if (contactAction[1] === 'ask')
+        return {
+          chatId: ownerId,
+          text: `Удалить контакт «${point.contacts[index].label}»?`,
+          keyboard: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'Да, удалить',
+                  callback_data: `pp:contact:drop:${index}:${state.revision}`,
+                },
+              ],
+              [
+                {
+                  text: 'Нет',
+                  callback_data: `pp:contact:keep:${index}:${state.revision}`,
+                },
+              ],
+            ],
+          },
+        };
+      if (contactAction[1] === 'keep') return this.draftReply(ownerId, state);
+      const next = structuredClone(state);
+      const nextPoint = next.payload as PointDraft;
+      if (contactAction[1] === 'edit') {
+        nextPoint.pendingContact = { editingIndex: index };
+        next.step = 'CONTACT_TYPE';
+      } else if (contactAction[1] === 'drop') {
+        nextPoint.contacts.splice(index, 1);
+      } else {
+        const other = contactAction[1] === 'up' ? index - 1 : index + 1;
+        if (other < 0 || other >= nextPoint.contacts.length)
+          return { chatId: ownerId, callbackText: 'Край списка' };
+        [nextPoint.contacts[index], nextPoint.contacts[other]] = [
+          nextPoint.contacts[other],
+          nextPoint.contacts[index],
+        ];
+      }
+      nextPoint.contacts.forEach((contact, order) => {
+        contact.displayOrder = order;
+      });
+      next.revision += 1;
+      await this.saveDraft(tx, ownerId, next);
+      return this.draftReply(ownerId, next);
+    }
     const pushAction = /^pp:push:([0-9a-f-]{36}):(confirm|cancel)$/iu.exec(
       data,
     );
@@ -801,13 +1381,19 @@ export class PartnerBotService {
       });
       return this.draftReply(ownerId, advanced.state);
     }
-    const match = /^pp:(add|done|confirm|cancel):(\d+)$/u.exec(data);
+    const match = /^pp:(add|done|confirm|save|cancel):(\d+)$/u.exec(data);
     if (!match || !state || Number(match[2]) !== state.revision)
       return {
         chatId: ownerId,
         callbackText: 'Кнопка устарела или мастер завершён',
       };
     const action = match[1];
+    if (action === 'save' && state.kind === 'POINT' && state.step === 'PREVIEW')
+      return {
+        chatId: ownerId,
+        text: 'Черновик сохранён в базе на 24 часа. Точка не опубликована. Для продолжения откройте «Партнёрские точки» → «Продолжить черновик».',
+        callbackText: 'Черновик сохранён',
+      };
     if (action === 'cancel') {
       await this.deletePendingImage(tx, state);
       await tx.partnerBotDraft.delete({ where: { ownerTelegramId: ownerId } });
@@ -825,6 +1411,12 @@ export class PartnerBotService {
         { action: action === 'add' ? 'ADD_CONTACT' : 'DONE_CONTACTS' },
         new Date(),
       );
+      if (
+        action === 'done' &&
+        (advanced.state.payload as PointDraft).quickEdit === 'CONTACTS'
+      ) {
+        advanced.state.step = 'PREVIEW';
+      }
       await tx.partnerBotDraft.update({
         where: { ownerTelegramId: ownerId },
         data: {
@@ -849,6 +1441,11 @@ export class PartnerBotService {
       )
         return { chatId: ownerId, callbackText: 'Черновик неполный' };
       if (
+        new Date(point.startsAt) >= new Date(point.endsAt) ||
+        new Date(point.endsAt) <= new Date()
+      )
+        return { chatId: ownerId, callbackText: 'Проверьте срок размещения' };
+      if (
         point.imageAssetKey &&
         point.imageAssetKey !== point.originalImageAssetKey &&
         !(await tx.partnerImageAsset.findUnique({
@@ -862,12 +1459,13 @@ export class PartnerBotService {
             'Изображение недоступно. Начните редактирование заново.',
         };
       const contacts = point.contacts.map((contact: ContactDraft) => ({
+        id: contact.id,
         type: contact.type,
         label: contact.label,
         value: contact.value,
         displayOrder: contact.displayOrder,
       }));
-      const data = {
+      const placementData = {
         title: point.title,
         category: point.category,
         ...safePartnerAppearance(point.backgroundColor, point.textColor),
@@ -877,6 +1475,7 @@ export class PartnerBotService {
         displayAddress: point.displayAddress ?? null,
         imageAssetKey: point.imageAssetKey ?? null,
         promoCode: point.promoCode ?? null,
+        promoTerms: point.promoCode ? (point.promoTerms ?? null) : null,
         startsAt: new Date(point.startsAt),
         endsAt: new Date(point.endsAt),
       };
@@ -895,10 +1494,46 @@ export class PartnerBotService {
             chatId: ownerId,
             callbackText: 'Точка недоступна для изменения',
           };
-        await tx.partnerPoint.update({
-          where: { id: point.editingId },
-          data: { ...data, contacts: { deleteMany: {}, create: contacts } },
+        const storedContacts = await tx.partnerPointContact.findMany({
+          where: { partnerPointId: point.editingId },
+          select: { id: true, type: true, value: true },
         });
+        const stable = new Map(
+          storedContacts.map((contact) => [contact.id, contact]),
+        );
+        const retained = contacts.filter((contact) => {
+          const old = contact.id ? stable.get(contact.id) : null;
+          return (
+            old && old.type === contact.type && old.value === contact.value
+          );
+        });
+        const retainedIds = retained.map((contact) => contact.id as string);
+        await tx.partnerPoint.update({ where: { id: point.editingId }, data: placementData });
+        await tx.partnerPointContact.deleteMany({
+          where: {
+            partnerPointId: point.editingId,
+            id: { notIn: retainedIds },
+          },
+        });
+        for (const contact of retained) {
+          await tx.partnerPointContact.update({
+            where: { id: contact.id },
+            data: { label: contact.label, displayOrder: contact.displayOrder },
+          });
+        }
+        const fresh = contacts.filter(
+          (contact) => !retainedIds.includes(contact.id ?? ''),
+        );
+        if (fresh.length)
+          await tx.partnerPointContact.createMany({
+            data: fresh.map((contact) => ({
+              partnerPointId: point.editingId as string,
+              type: contact.type,
+              label: contact.label,
+              value: contact.value,
+              displayOrder: contact.displayOrder,
+            })),
+          });
         if (
           existing.imageAssetKey &&
           existing.imageAssetKey !== point.imageAssetKey &&
@@ -915,7 +1550,7 @@ export class PartnerBotService {
         await tx.partnerPoint.create({
           data: {
             cityId: point.cityId,
-            ...data,
+            ...placementData,
             status: 'ACTIVE',
             contacts: { create: contacts },
           },
@@ -972,14 +1607,17 @@ export class PartnerBotService {
         partnerPointId: banner.partnerPointId,
         startsAt: new Date(banner.startsAt),
         endsAt: new Date(banner.endsAt),
-        enabled: true,
+        enabled: banner.preserveEnabled ?? true,
       },
     });
     await tx.partnerBotDraft.delete({ where: { ownerTelegramId: ownerId } });
     return {
       chatId: ownerId,
-      text: 'Баннер отдельно подтверждён и включён. Срок и статус точки не изменены.',
-      callbackText: 'Баннер включён',
+      text:
+        banner.preserveEnabled === false
+          ? 'Изменения баннера сохранены. Он остаётся выключенным; включите его отдельной кнопкой.'
+          : 'Баннер сохранён. Срок и статус точки не изменены.',
+      callbackText: 'Баннер сохранён',
     };
   }
 }

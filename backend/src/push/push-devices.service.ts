@@ -38,7 +38,11 @@ export class PushDevicesService {
       .update(input.token, 'utf8')
       .digest('hex');
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${identityKey}))`;
+      // Prisma's PostgreSQL adapter cannot materialize a raw `void` result.
+      // Keep the transaction-scoped lock, but return a supported scalar.
+      await tx.$queryRaw<readonly { locked: boolean }[]>`
+        SELECT pg_advisory_xact_lock(hashtext(${identityKey})) IS NULL AS locked
+      `;
       const existing = await tx.pushDevice.findUnique({
         where: {
           identityKey_installationId: {
@@ -47,6 +51,10 @@ export class PushDevicesService {
           },
         },
       });
+      const roadPushEnabled =
+        input.roadPushEnabled ?? existing?.roadPushEnabled ?? true;
+      const newsPushEnabled =
+        input.newsPushEnabled ?? existing?.newsPushEnabled ?? true;
       if (!existing) {
         const count = await tx.pushDevice.count({
           where: { identityKey, enabled: true },
@@ -60,6 +68,8 @@ export class PushDevicesService {
       if (
         existing?.tokenHash === tokenHash &&
         existing.cityId === input.cityId &&
+        existing.roadPushEnabled === roadPushEnabled &&
+        existing.newsPushEnabled === newsPushEnabled &&
         existing.enabled
       )
         return;
@@ -82,6 +92,8 @@ export class PushDevicesService {
           token: input.token,
           tokenHash,
           enabled: true,
+          roadPushEnabled,
+          newsPushEnabled,
         },
         update: {
           identityKey,
@@ -91,8 +103,32 @@ export class PushDevicesService {
           provider: input.provider,
           token: input.token,
           enabled: true,
+          roadPushEnabled,
+          newsPushEnabled,
         },
       });
+      if (existing) {
+        await tx.pushOutbox.updateMany({
+          where: {
+            deviceId: existing.id,
+            status: { in: ['PENDING', 'RETRY'] },
+            OR: [
+              ...(!roadPushEnabled ? [{ kind: 'ROAD_EVENT' as const }] : []),
+              ...(!newsPushEnabled
+                ? [
+                    {
+                      kind: {
+                        in: ['PARTNER_POINT' as const, 'GENERAL' as const],
+                      },
+                    },
+                  ]
+                : []),
+              { cityId: { not: input.cityId } },
+            ],
+          },
+          data: { status: 'CANCELLED' },
+        });
+      }
     });
     return { registered: true };
   }

@@ -44,6 +44,12 @@ describe('PushDevicesService', () => {
 
   it('rotates token for the installation without storing raw identity', async () => {
     await service.register('secret-identity-id', input);
+    const lockQuery = (
+      tx.$queryRaw.mock.calls as unknown as Array<
+        [TemplateStringsArray, ...unknown[]]
+      >
+    )[0][0].join(' ');
+    expect(lockQuery).toContain('IS NULL AS locked');
     const removed = (
       deleteMany.mock.calls as unknown as Array<
         [
@@ -73,7 +79,35 @@ describe('PushDevicesService', () => {
       identityKey: 'identity-hmac',
       token: input.token,
       enabled: true,
+      roadPushEnabled: true,
+      newsPushEnabled: true,
     });
+  });
+
+  it('persists a separate marketing opt-out and cancels waiting news', async () => {
+    findUnique.mockResolvedValueOnce({
+      id: 'device-1',
+      tokenHash: 'old-token',
+      cityId: 'balakovo',
+      roadPushEnabled: true,
+      newsPushEnabled: true,
+      enabled: true,
+    });
+    await service.register('identity', { ...input, newsPushEnabled: false });
+    const upsertCall = (
+      upsert.mock.calls as unknown as Array<
+        [{ update: { roadPushEnabled: boolean; newsPushEnabled: boolean } }]
+      >
+    )[0][0];
+    expect(upsertCall.update.roadPushEnabled).toBe(true);
+    expect(upsertCall.update.newsPushEnabled).toBe(false);
+    const cancelled = (
+      outboxUpdateMany.mock.calls as unknown as Array<
+        [{ where: { deviceId: string }; data: { status: string } }]
+      >
+    )[0][0];
+    expect(cancelled.where.deviceId).toBe('device-1');
+    expect(cancelled.data.status).toBe('CANCELLED');
   });
 
   it('rejects platform/provider mismatch', async () => {

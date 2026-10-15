@@ -116,6 +116,12 @@ export class IdentityService {
       .digest('hex');
   }
 
+  identityCountKey(identityId: string): string {
+    return createHmac('sha256', this.signingSecret)
+      .update(`identity-count:v1:${identityId}`, 'utf8')
+      .digest('hex');
+  }
+
   private sign(value: string): string {
     return createHmac('sha256', this.signingSecret)
       .update(value, 'utf8')

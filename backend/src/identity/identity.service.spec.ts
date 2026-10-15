@@ -4,6 +4,9 @@ import type { ConfigService } from '@nestjs/config';
 import { AnonymousIdentityGuard } from './anonymous-identity.guard';
 import { IdentityController } from './identity.controller';
 import { IdentityService } from './identity.service';
+import { IdentityTrackingService } from './identity-tracking.service';
+
+jest.mock('../database/prisma.service', () => ({ PrismaService: class {} }));
 
 const TEST_SIGNING_SECRET = 'test-only-identity-signing-secret-32-characters';
 
@@ -15,8 +18,15 @@ describe('anonymous identity', () => {
   const identityService = new IdentityService(
     configService as unknown as ConfigService,
   );
-  const controller = new IdentityController(identityService);
-  const guard = new AnonymousIdentityGuard(identityService);
+  const tracking = { recordSafely: jest.fn().mockResolvedValue(undefined) };
+  const controller = new IdentityController(
+    identityService,
+    tracking as unknown as IdentityTrackingService,
+  );
+  const guard = new AnonymousIdentityGuard(
+    identityService,
+    tracking as unknown as IdentityTrackingService,
+  );
 
   const createContext = (authorization?: string) => {
     const request: {
@@ -35,8 +45,8 @@ describe('anonymous identity', () => {
     return { context, request };
   };
 
-  it('issues an anonymous identity from the endpoint', () => {
-    const response = controller.createAnonymousIdentity();
+  it('issues an anonymous identity from the endpoint', async () => {
+    const response = await controller.createAnonymousIdentity();
 
     expect(Object.keys(response)).toEqual(['token']);
     expect(response.token).toEqual(expect.any(String));
@@ -45,12 +55,12 @@ describe('anonymous identity', () => {
     );
   });
 
-  it('accepts a valid Bearer token', () => {
+  it('accepts a valid Bearer token', async () => {
     const { token } = identityService.issueAnonymousIdentity();
     const expectedIdentityId = identityService.verifyAnonymousIdentity(token);
     const { context, request } = createContext(`Bearer ${token}`);
 
-    expect(guard.canActivate(context)).toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(request.anonymousIdentityId).toBe(expectedIdentityId);
   });
 
@@ -80,7 +90,7 @@ describe('anonymous identity', () => {
 
   it.each(['payload', 'signature'] as const)(
     'rejects a token with a changed %s',
-    (part) => {
+    async (part) => {
       const { token } = identityService.issueAnonymousIdentity();
       const [version, encodedPayload, signature] = token.split('.');
 
@@ -104,23 +114,27 @@ describe('anonymous identity', () => {
           : [
               version,
               encodedPayload,
-              `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`,
+              `${signature.startsWith('A') ? 'B' : 'A'}${signature.slice(1)}`,
             ].join('.');
 
       const { context } = createContext(`Bearer ${tamperedToken}`);
 
-      expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
-      expect(() => guard.canActivate(context)).toThrow(
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      await expect(guard.canActivate(context)).rejects.toThrow(
         'Invalid anonymous identity token',
       );
     },
   );
 
-  it('rejects a request without an identity token', () => {
+  it('rejects a request without an identity token', async () => {
     const { context } = createContext();
 
-    expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
-    expect(() => guard.canActivate(context)).toThrow(
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      UnauthorizedException,
+    );
+    await expect(guard.canActivate(context)).rejects.toThrow(
       'Anonymous identity token is required',
     );
   });

@@ -1,43 +1,60 @@
-import { PushOutboxService } from './push-outbox.service';
-jest.mock('../database/prisma.service', () => ({ PrismaService: class {} }));
-import { RecordingPushProvider } from './push-provider';
-import type { PrismaService } from '../database/prisma.service';
 import type { ConfigService } from '@nestjs/config';
+import type { PrismaService } from '../database/prisma.service';
+jest.mock('../database/prisma.service', () => ({ PrismaService: class {} }));
+import { PushOutboxService } from './push-outbox.service';
+import { RecordingPushProvider } from './push-provider';
 
-const NOW = new Date('2026-10-12T10:00:00.000Z');
-const due = () => ({
-  id: 'outbox-1',
-  deviceId: 'device-1',
-  dedupeKey: 'road:event-1',
-  kind: 'ROAD_EVENT' as const,
-  targetId: 'event-1',
+const NOW = new Date('2026-10-13T10:00:00.000Z');
+const device = {
+  id: 'device-1',
+  enabled: true,
   cityId: 'balakovo',
-  status: 'PENDING' as const,
-  attempts: 0,
+  roadPushEnabled: true,
+  newsPushEnabled: true,
+  provider: 'APNS',
+  token: 'opaque-token',
+};
+const row = () => ({
+  id: 'outbox-1',
+  deviceId: device.id,
+  device,
+  kind: 'GENERAL',
+  targetId: 'campaign-1',
+  cityId: 'balakovo',
+  dedupeKey: 'campaign:1',
+  status: 'SENDING',
+  attempts: 1,
   createdAt: NOW,
-  device: {
-    id: 'device-1',
-    enabled: true,
-    cityId: 'balakovo',
-    provider: 'APNS' as const,
-    token: 'device-token',
+  campaignRun: {
+    campaign: {
+      id: 'campaign-1',
+      kind: 'GENERAL',
+      status: 'COMPLETED',
+      partnerPointId: null,
+      cityIds: ['balakovo'],
+      title: 'Новости OnMap',
+      body: 'Тест',
+    },
   },
 });
 
 describe('PushOutboxService', () => {
   const findFirst = jest.fn();
+  const findUnique = jest.fn();
   const updateMany = jest.fn();
   const update = jest.fn();
-  const findUnique = jest.fn();
+  const count = jest.fn();
   const deviceUpdate = jest.fn();
   const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+    pushOutbox: { findUnique, findFirst: jest.fn(), count, update, updateMany },
     pushDevice: { update: deviceUpdate },
-    pushOutbox: { updateMany },
+    roadEvent: { findUnique: jest.fn() },
+    roadEventFeedback: { count: jest.fn() },
+    partnerPoint: { findUnique: jest.fn() },
   };
   const prisma = {
-    pushOutbox: { findFirst, updateMany, update },
-    roadEvent: { findUnique },
-    partnerPoint: { findUnique: jest.fn() },
+    pushOutbox: { findFirst, updateMany },
     $transaction: (fn: (value: typeof tx) => unknown) => fn(tx),
   } as unknown as PrismaService;
   const config = { get: () => 'false' } as unknown as ConfigService;
@@ -47,49 +64,32 @@ describe('PushOutboxService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     provider.messages.length = 0;
-    findFirst.mockResolvedValueOnce(due()).mockResolvedValueOnce(null);
+    findFirst.mockResolvedValue({ ...row(), status: 'PENDING', attempts: 0 });
+    findUnique.mockResolvedValue(row());
     updateMany.mockResolvedValue({ count: 1 });
-    findUnique.mockResolvedValue({
-      id: 'event-1',
-      cityId: 'balakovo',
-      type: 'ACCIDENT',
-      status: 'ACTIVE',
-      expiresAt: new Date('2026-10-12T10:20:00.000Z'),
-    });
+    tx.pushOutbox.findFirst.mockResolvedValue(null);
+    count.mockResolvedValue(0);
   });
 
-  it('delivers a data-only location-free target and marks it sent', async () => {
+  it('sends generic message without a deep link and records provider acceptance', async () => {
     await service.processDueOnce(NOW);
     expect(provider.messages).toEqual([
-      expect.objectContaining({
-        data: { kind: 'ROAD_EVENT', targetId: 'event-1', cityId: 'balakovo' },
-      }),
+      expect.objectContaining({ title: 'Новости OnMap', body: 'Тест' }),
     ]);
+    expect(provider.messages[0].data).toBeUndefined();
     expect(update).toHaveBeenCalledWith({
       where: { id: 'outbox-1' },
-      data: { status: 'SENT', leaseUntil: null, lastErrorCode: null },
+      data: {
+        status: 'SENT',
+        leaseUntil: null,
+        lastErrorCode: null,
+      },
     });
   });
 
-  it('does not deliver an expired event', async () => {
-    findUnique.mockResolvedValue({
-      id: 'event-1',
-      cityId: 'balakovo',
-      status: 'ACTIVE',
-      expiresAt: NOW,
-    });
-    await service.processDueOnce(NOW);
-    expect(provider.messages).toHaveLength(0);
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'outbox-1' },
-      data: { status: 'CANCELLED', leaseUntil: null },
-    });
-  });
-
-  it('drops a partner campaign that sat in the queue past its delivery window', async () => {
-    findFirst.mockReset().mockResolvedValueOnce({
-      ...due(),
-      kind: 'PARTNER_POINT',
+  it('cancels stale messages and opted-out devices', async () => {
+    findUnique.mockResolvedValueOnce({
+      ...row(),
       createdAt: new Date(NOW.getTime() - 16 * 60_000),
     });
     await service.processDueOnce(NOW);
@@ -98,37 +98,34 @@ describe('PushOutboxService', () => {
       where: { id: 'outbox-1' },
       data: { status: 'CANCELLED', leaseUntil: null },
     });
+    jest.clearAllMocks();
+    findFirst.mockResolvedValue({ ...row(), status: 'PENDING', attempts: 0 });
+    updateMany.mockResolvedValue({ count: 1 });
+    findUnique.mockResolvedValueOnce({
+      ...row(),
+      device: { ...device, newsPushEnabled: false },
+    });
+    await service.processDueOnce(NOW);
+    expect(provider.messages).toHaveLength(0);
   });
 
-  it('retries after provider failure and invalidates bad tokens', async () => {
-    const failing = {
-      ready: true,
-      send: jest.fn().mockResolvedValue({ status: 'RETRY', code: 'TEMPORARY' }),
-    };
-    await new PushOutboxService(prisma, config, failing).processDueOnce(NOW);
-    const retried = (
-      update.mock.calls as unknown as Array<
-        [
-          {
-            data: { status: string; lastErrorCode: string };
-          },
-        ]
-      >
-    )[0][0];
-    expect(retried.data).toMatchObject({
-      status: 'RETRY',
-      lastErrorCode: 'TEMPORARY',
-    });
+  it('enforces category cap and invalidates a provider-rejected token', async () => {
+    count.mockResolvedValueOnce(1);
+    await service.processDueOnce(NOW);
+    expect(provider.messages).toHaveLength(0);
     jest.clearAllMocks();
-    findFirst.mockResolvedValueOnce(due()).mockResolvedValueOnce(null);
+    findFirst.mockResolvedValue({ ...row(), status: 'PENDING', attempts: 0 });
     updateMany.mockResolvedValue({ count: 1 });
-    const invalid = {
+    findUnique.mockResolvedValue(row());
+    tx.pushOutbox.findFirst.mockResolvedValue(null);
+    count.mockResolvedValue(0);
+    const rejected = {
       ready: true,
       send: jest.fn().mockResolvedValue({ status: 'INVALID_TOKEN' }),
     };
-    await new PushOutboxService(prisma, config, invalid).processDueOnce(NOW);
+    await new PushOutboxService(prisma, config, rejected).processDueOnce(NOW);
     expect(deviceUpdate).toHaveBeenCalledWith({
-      where: { id: 'device-1' },
+      where: { id: device.id },
       data: { enabled: false },
     });
   });

@@ -29,6 +29,7 @@ export const parseRestrictionHours = (raw: string | undefined): number[] => {
 
 export type ModerationCallbackAction =
   | { kind: 'RESTORE'; eventId: string }
+  | { kind: 'CLOSE_HIDDEN'; eventId: string }
   | { kind: 'CHOOSE_RESTRICTION'; eventId: string }
   | { kind: 'RESTRICT'; eventId: string; hours: number };
 
@@ -41,6 +42,9 @@ export const parseModerationCallback = (
 ): ModerationCallbackAction | null => {
   let match = new RegExp(`^restore:(${UUID})$`, 'iu').exec(data);
   if (match?.[1]) return { kind: 'RESTORE', eventId: match[1] };
+
+  match = new RegExp(`^closehidden:(${UUID})$`, 'iu').exec(data);
+  if (match?.[1]) return { kind: 'CLOSE_HIDDEN', eventId: match[1] };
 
   match = new RegExp(`^restrict:(${UUID})$`, 'iu').exec(data);
   if (match?.[1]) return { kind: 'CHOOSE_RESTRICTION', eventId: match[1] };

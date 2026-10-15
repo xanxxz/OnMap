@@ -9,6 +9,9 @@ import type { ConfigService } from '@nestjs/config';
 import type { PrismaService } from '../../../database/prisma.service';
 import type { RoadEventsGateway } from '../../../road-events/realtime/road-events.gateway';
 import type { PartnerBotService } from '../../../partner-placements/partner-bot.service';
+import type { PushCampaignBotService } from '../../../push/push-campaign-bot.service';
+import type { TelegramOwnerPanelService } from './telegram-owner-panel.service';
+import type { PushOwnerPairingService } from '../../../push/push-owner-pairing.service';
 import {
   formatModerationPollingFailure,
   TelegramModerationBotService,
@@ -100,6 +103,19 @@ const createService = (expiresAt = new Date(Date.now() + 60_000)) => {
       shouldHandle: jest.fn().mockResolvedValue(false),
       process: jest.fn(),
     } as unknown as PartnerBotService,
+    {
+      shouldHandle: jest.fn().mockResolvedValue(false),
+      process: jest.fn(),
+    } as unknown as PushCampaignBotService,
+    {
+      shouldHandle: jest.fn().mockReturnValue(false),
+      shouldHandleSearchText: jest.fn().mockResolvedValue(false),
+      process: jest.fn(),
+    } as unknown as TelegramOwnerPanelService,
+    {
+      createCode: jest.fn(),
+      sendCampaignTest: jest.fn(),
+    } as unknown as PushOwnerPairingService,
   );
   const privateService = service as unknown as {
     active: boolean;
@@ -223,6 +239,29 @@ describe('TelegramModerationBotService', () => {
       ),
     ).resolves.toMatchObject({ status: 'EXPIRED' });
     expect(executedSql.some((sql) => sql.includes('resolved_at'))).toBe(true);
+  });
+
+  it('closes review without revealing the hidden event or restricting its author', async () => {
+    const { privateService, executedSql } = createService();
+    await expect(
+      privateService.processCallbackUpdate(
+        46,
+        { kind: 'CLOSE_HIDDEN', eventId: EVENT_ID },
+        { from: { id: Number(OWNER_ID) } },
+      ),
+    ).resolves.toMatchObject({
+      status: 'CLOSED_HIDDEN',
+      event: { status: 'HIDDEN_PENDING_REVIEW' },
+    });
+    expect(executedSql.some((sql) => sql.includes("'CLOSED_HIDDEN'"))).toBe(
+      true,
+    );
+    expect(executedSql.some((sql) => sql.includes('UPDATE road_events'))).toBe(
+      false,
+    );
+    expect(executedSql.some((sql) => sql.includes('actor_restrictions'))).toBe(
+      false,
+    );
   });
 
   it('restricts only the linked author for a finite configured duration', async () => {

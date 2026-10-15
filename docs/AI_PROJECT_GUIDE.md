@@ -1,6 +1,6 @@
 # RoadRadar / OnMap — инструкция для AI-агентов
 
-Пользовательское имя продукта: **OnMap**. Технические идентификаторы (пакет, bundle ID, Android application ID, модуль RN, ключи AsyncStorage identity) остаются **`RoadRadar` / `com.roadradar.app`**. Не переименовывать без явной задачи.
+Пользовательское имя продукта: **OnMap**. iOS и Android Release используют `com.onmap.app`, Android Debug — `com.onmap.app.dev`. Android Kotlin/Java `namespace` и пакеты классов остаются `com.roadradar.app`; RN-модуль и ключи AsyncStorage не переименованы.
 
 Этот файл описывает **подтверждённое поведение из кода**. Где данных нет — помечено как неизвестное.
 
@@ -402,7 +402,7 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 
 ## 14. Соглашения по коду
 
-- Не ломать bundle id / applicationId / RN name `RoadRadar` / display name OnMap.
+- Не ломать Release bundle ID / applicationId `com.onmap.app`, Android Debug ID `com.onmap.app.dev`, Android namespace `com.roadradar.app`, RN name `RoadRadar` / display name OnMap.
 - Координаты API и карты: `[lng, lat]`.
 - `cityId` строкой, не угадывать другие города.
 - TTL и расчёт доверия сохранённых событий определяет backend `road-event-confidence.ts`; mobile отображает `confidencePercent`, `status` и `expiresAt` из API.
@@ -445,7 +445,7 @@ Docker порт хоста **5434**, не 5432, чтобы не конфликт
 3. Имена Socket.IO событий и комната `road-events:{cityId}`.
 4. Query keys: `['road-events','viewport', cityId, west, south, east, north]` — realtime cache парсит **ровно 7** элементов.
 5. `cityId: "balakovo"` и bbox покрытия — иначе create/list/telegram отфильтруют данные.
-6. Bundle ID `com.roadradar.app`, AsyncStorage `roadradarIdentity`, onboarding key `onmap:onboarding`.
+6. Release Bundle ID / applicationId `com.onmap.app`, Android Debug `com.onmap.app.dev`, Android namespace `com.roadradar.app`, AsyncStorage `roadradarIdentity`, onboarding key `onmap:onboarding`.
 7. PostGIS column `location` и raw SQL в `RoadEventsService` / telegram persistence.
 8. Идемпотентность telegram messages unique `(source, sourceChatId, externalMessageId)`.
 9. Честная точность: STREET/AREA не превращать в «точный пин» без изменения продукта.
