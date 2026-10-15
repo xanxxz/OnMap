@@ -2,10 +2,12 @@ import UIKit
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
+import os
 import UserNotifications
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+  private let pushLogger = Logger(subsystem: "com.onmap.app", category: "push-registration")
   var window: UIWindow?
 
   var reactNativeDelegate: ReactNativeDelegate?
@@ -46,8 +48,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
+    pushLogger.info("AppDelegate received APNs registration success callback")
     let token = deviceToken.map { String(format: "%02x", $0) }.joined()
     OnMapPush.didRegister(token: token)
+  }
+
+  func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    let code = (error as NSError).code
+    pushLogger.error("AppDelegate received APNs registration failure callback, error code: \(code, privacy: .public)")
+    OnMapPush.didFailToRegister(errorCode: code)
   }
 
   func userNotificationCenter(

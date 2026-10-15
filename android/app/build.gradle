@@ -2,9 +2,13 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-// The Firebase project is owner-provided. Keep local builds working without it.
-if (file("google-services.json").exists()) {
-    apply plugin: "com.google.gms.google-services"
+// Release Firebase configuration is in src/release; src/debug is optional.
+apply plugin: "com.google.gms.google-services"
+
+// Debug is intentionally allowed without Firebase. Never reuse Release's
+// google-services.json for the differently identified Debug application.
+tasks.matching { it.name == "processDebugGoogleServices" }.configureEach {
+    onlyIf { file("src/debug/google-services.json").exists() }
 }
 
 // Release always uses the checked-in, secret-free production endpoint config.
@@ -95,7 +99,7 @@ android {
 
     namespace "com.roadradar.app"
     defaultConfig {
-        applicationId "com.roadradar.app"
+        applicationId "com.onmap.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -125,6 +129,7 @@ android {
     }
     buildTypes {
         debug {
+            applicationIdSuffix ".dev"
             signingConfig signingConfigs.debug
         }
         release {

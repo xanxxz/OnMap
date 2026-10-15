@@ -11,9 +11,9 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		15432F34986CBE16753CCE17 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		A1D8A95F93CB4C30A69D9911 /* OnMapPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D8A95F93CB4C30A69D9912 /* OnMapPush.swift */; };
 		A1D8A95F93CB4C30A69D9913 /* OnMapPushBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = A1D8A95F93CB4C30A69D9914 /* OnMapPushBridge.m */; };
-		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		A5B909CA306526FB003773B4 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 24AF3AAEB166750D6B800682 /* MapLibre */; };
 		FD86C952124D4421A489A755 /* Config.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 57171CEBC1B34506B30E1EF9 /* Config.xcconfig */; };
 /* End PBXBuildFile section */
@@ -28,9 +28,9 @@
 		57171CEBC1B34506B30E1EF9 /* Config.xcconfig */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-RoadRadar.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-RoadRadar.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = RoadRadar/AppDelegate.swift; sourceTree = "<group>"; };
+		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = RoadRadar/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A1D8A95F93CB4C30A69D9912 /* OnMapPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnMapPush.swift; path = RoadRadar/OnMapPush.swift; sourceTree = "<group>"; };
 		A1D8A95F93CB4C30A69D9914 /* OnMapPushBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = OnMapPushBridge.m; path = RoadRadar/OnMapPushBridge.m; sourceTree = "<group>"; };
-		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = RoadRadar/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -200,7 +200,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  export ENVFILE=\".env.production\"\n  node \"$SRCROOT/../scripts/validate-mobile-release-env.js\" \"$SRCROOT/../$ENVFILE\"\nfi\n\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"\\\"$WITH_ENVIRONMENT\\\" \\\"$REACT_NATIVE_XCODE\\\"\"\n";
+			shellScript = "set -e\n\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  export ENVFILE=\".env.production\"\n  node \"$SRCROOT/../scripts/validate-mobile-release-env.js\" \"$SRCROOT/../$ENVFILE\"\n  node \"$SRCROOT/../scripts/validate-ios-release-config.js\" \"$SRCROOT/../node_modules/react-native-config/ios/ReactNativeConfig/GeneratedDotEnv.m\" \"$SRCROOT/../$ENVFILE\"\nfi\n\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"\\\"$WITH_ENVIRONMENT\\\" \\\"$REACT_NATIVE_XCODE\\\"\"\n";
 		};
 		00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -298,10 +298,10 @@
 			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-RoadRadar.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = RoadRadar/PushDebug.entitlements;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = RoadRadar/PushDebug.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4LCMQTY8A4;
+				DEVELOPMENT_TEAM = B2Q3394D75;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = RoadRadar/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
@@ -316,12 +316,15 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.daniildeynega.onmap.dev;
+				PRODUCT_BUNDLE_IDENTIFIER = com.onmap.dev;
 				PRODUCT_NAME = RoadRadar;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;
@@ -331,9 +334,10 @@
 			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-RoadRadar.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = RoadRadar/PushRelease.entitlements;
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = RoadRadar/PushRelease.entitlements;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = B2Q3394D75;
 				ENVFILE = .env.production;
 				INFOPLIST_FILE = RoadRadar/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
@@ -348,11 +352,14 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.roadradar.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.onmap.app;
 				PRODUCT_NAME = RoadRadar;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;

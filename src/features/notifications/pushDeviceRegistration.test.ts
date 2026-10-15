@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {httpRequest} from '../../shared/api/httpClient';
 import {checkNotificationPermission} from './notificationPermission';
 import {pushNative} from './pushNative';
-import {getPushInstallationId, registerPushDevice, revokePushDevice} from './pushDeviceRegistration';
+import {bindOwnerTestDevice, getPushInstallationId, registerPushDevice, revokePushDevice} from './pushDeviceRegistration';
 
 jest.mock('../../shared/api/httpClient', () => ({httpRequest: jest.fn()}));
 jest.mock('./notificationPermission', () => ({checkNotificationPermission: jest.fn()}));
@@ -28,6 +28,7 @@ describe('push device registration', () => {
     expect(await registerPushDevice('balakovo', 'b'.repeat(64))).toBe(true);
     const calls = (httpRequest as jest.Mock).mock.calls;
     expect(JSON.parse(calls[0][1].body).installationId).toBe(first);
+    expect(JSON.parse(calls[0][1].body)).toMatchObject({roadPushEnabled: true, newsPushEnabled: true});
     expect(JSON.parse(calls[1][1].body).installationId).toBe(first);
     expect(JSON.parse(calls[1][1].body).token).toBe('b'.repeat(64));
     await revokePushDevice();
@@ -40,5 +41,20 @@ describe('push device registration', () => {
     expect(await registerPushDevice('balakovo', 'a'.repeat(64))).toBe(false);
     expect(httpRequest).not.toHaveBeenCalled();
     Object.assign(pushNative, {provider: previous});
+  });
+
+  it('accepts a one-time owner code without sending a push token', async () => {
+    const installationId = await getPushInstallationId();
+    await bindOwnerTestDevice('ABCD-EF01-2345');
+    expect(httpRequest).toHaveBeenCalledWith('/push/devices/owner-test-pairing', {
+      method: 'POST',
+      body: JSON.stringify({installationId, code: 'ABCDEF012345'}),
+    });
+    expect(JSON.stringify((httpRequest as jest.Mock).mock.calls)).not.toContain('token');
+  });
+
+  it('rejects malformed owner codes before making a request', async () => {
+    await expect(bindOwnerTestDevice('123')).rejects.toThrow('INVALID_PAIRING_CODE');
+    expect(httpRequest).not.toHaveBeenCalled();
   });
 });

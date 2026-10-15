@@ -37,5 +37,18 @@ target 'RoadRadar' do
     )
 
     $MLRN.post_install(installer)
+
+    # react-native-config's generated native module is built as a separate Pod
+    # target, so the app target's ENVFILE setting does not reliably reach it.
+    # Pin the same env selection on that Pod target for every build variant.
+    react_native_config = installer.pods_project.targets.find do |pod_target|
+      pod_target.name == 'react-native-config'
+    end
+    if react_native_config
+      react_native_config.build_configurations.each do |build_configuration|
+        build_configuration.build_settings['ENVFILE'] =
+          build_configuration.name == 'Release' ? '.env.production' : '.env'
+      end
+    end
   end
 end
