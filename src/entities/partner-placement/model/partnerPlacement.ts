@@ -26,6 +26,7 @@ export interface PartnerPoint {
   endsAt: string;
   imageUrl: string | null;
   promoCode: string | null;
+  promoTerms?: string | null;
   contacts: PartnerContact[];
 }
 

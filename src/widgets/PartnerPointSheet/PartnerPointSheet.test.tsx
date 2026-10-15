@@ -60,9 +60,9 @@ it('applies the selected color pair to the partner category and contact action',
     onClose={jest.fn()}
   />); });
   const category = renderer.root.findByProps({testID: 'partner-category'});
-  expect(StyleSheet.flatten(category.props.style)).toMatchObject({
-    backgroundColor: '#F7F4EA', color: '#14241E',
-  });
+  expect(StyleSheet.flatten(category.props.style)).toMatchObject({borderColor: '#153D32'});
+  expect(StyleSheet.flatten(renderer.root.findByProps({testID: 'partner-artwork'}).props.style).borderColor).toBe('#153D32');
+  expect(StyleSheet.flatten(renderer.root.findByProps({testID: 'partner-address-icon'}).props.style).borderColor).toBe('#153D32');
   const action = renderer.root.findByProps({accessibilityLabel: 'Позвонить: +79990000000'});
   expect(StyleSheet.flatten(action.props.style({pressed: false})).backgroundColor).toBe('#F7F4EA');
   act(() => renderer.unmount());
@@ -91,4 +91,16 @@ it('explains clipboard errors and leaves the code selectable', () => {
   expect(renderer.root.findByProps({children: 'Не удалось скопировать. Выделите код вручную.'})).toBeDefined();
   expect(renderer.root.findByProps({children: 'SALE_20'}).props.selectable).toBe(true);
   act(() => renderer.unmount());
+});
+
+it('shows optional promo terms and opens an address query in Yandex Maps', async () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  let renderer!: ReactTestRenderer;
+  act(() => { renderer = create(<PartnerPointSheet point={{...point, promoCode: 'ONMAP10', promoTerms: 'На первое посещение'}} onClose={jest.fn()} />); });
+  expect(renderer.root.findByProps({children: 'На первое посещение'})).toBeDefined();
+  await act(async () => renderer.root.findByProps({accessibilityLabel: 'Открыть адрес в Яндекс Картах: Улица Ленина, 1'}).props.onPress());
+  expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/yandex\.ru\/maps\/\?text=/u));
+  expect(decodeURIComponent((openURL.mock.calls[0][0] as string).split('text=')[1])).toContain('Улица Ленина, 1');
+  act(() => renderer.unmount());
+  openURL.mockRestore();
 });

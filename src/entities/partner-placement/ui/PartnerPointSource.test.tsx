@@ -1,4 +1,5 @@
 import React from 'react';
+import {StyleSheet} from 'react-native';
 import {act, create, ReactTestRenderer} from 'react-test-renderer';
 import {PartnerPointSource} from './PartnerPointSource';
 import type {PartnerPoint} from '../model/partnerPlacement';
@@ -25,5 +26,16 @@ it('uses a distinct partner marker and selects its own point', () => {
   act(() => renderer.root.findByProps({testID: 'partner-point-partner-1'}).props.onPress());
   expect(onPointPress).toHaveBeenCalledWith(point);
   expect(renderer.root.findAllByProps({id: 'road-event-marker-partner-1'})).toHaveLength(0);
+  act(() => renderer.unmount());
+});
+
+it('keeps a cream partner colour visible on the map marker without changing the saved appearance', () => {
+  const lightPoint = {...point, appearance: {backgroundColor: '#F7F4EA', textColor: '#14241E'}};
+  let renderer!: ReactTestRenderer;
+  act(() => { renderer = create(<PartnerPointSource points={[lightPoint]} onPointPress={jest.fn()} />); });
+  expect(lightPoint.appearance).toEqual({backgroundColor: '#F7F4EA', textColor: '#14241E'});
+  expect(StyleSheet.flatten(renderer.root.findByProps({testID: 'partner-artwork'}).props.style).borderColor).toBe('#153D32');
+  expect(renderer.root.findByProps({testID: 'partner-artwork-fallback'}).props.style).toEqual(expect.arrayContaining([expect.objectContaining({color: '#153D32'})]));
+  expect(StyleSheet.flatten(renderer.root.findByProps({testID: 'partner-point-tip-partner-1'}).props.style).borderColor).toBe('#153D32');
   act(() => renderer.unmount());
 });

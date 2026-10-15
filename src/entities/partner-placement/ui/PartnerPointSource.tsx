@@ -4,6 +4,7 @@ import {Marker} from '@maplibre/maplibre-react-native';
 import type {PartnerPoint} from '../model/partnerPlacement';
 import {colors, shadows} from '../../../shared/theme';
 import {PartnerArtwork} from './PartnerArtwork';
+import {getPartnerAccentColor} from '../lib/partnerAppearance';
 
 interface Props {
   points: PartnerPoint[];
@@ -28,9 +29,9 @@ export const PartnerPointSource = ({points, selectedPointId, onPointPress}: Prop
           style={styles.touchTarget}
         >
           <View style={styles.marker}>
-            <PartnerArtwork imageUrl={point.imageUrl} size={36} selected={selectedPointId === point.id} />
+            <PartnerArtwork imageUrl={point.imageUrl} size={36} selected={selectedPointId === point.id} accentColor={getPartnerAccentColor(point.appearance)} />
           </View>
-          <View style={styles.tip} />
+          <View testID={`partner-point-tip-${point.id}`} style={[styles.tip, {borderColor: getPartnerAccentColor(point.appearance)}]} />
         </Pressable>
       </Marker>
     ))}

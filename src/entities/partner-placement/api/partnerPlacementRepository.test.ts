@@ -7,7 +7,7 @@ const point = {
   id: 'point-1', cityId: 'balakovo', title: 'Мастерская', category: 'Сервис',
   description: 'Ремонт', coordinates: {longitude: 47.8, latitude: 52.02},
   displayAddress: 'Балаково', startsAt: '2026-10-01T00:00:00.000Z',
-  endsAt: '2026-11-01T00:00:00.000Z', imageUrl: null, promoCode: null,
+  endsAt: '2026-11-01T00:00:00.000Z', imageUrl: null, promoCode: null, promoTerms: null,
   contacts: [{type: 'PHONE', label: 'Позвонить', value: '+79990000000', displayOrder: 0}],
 };
 

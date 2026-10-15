@@ -34,6 +34,7 @@ const isPoint = (value: unknown): boolean =>
   isNullableString(value.displayAddress) &&
   (value.imageUrl === null || isPartnerImagePath(value.imageUrl)) &&
   (value.promoCode === undefined || isNullableString(value.promoCode)) &&
+  (value.promoTerms === undefined || isNullableString(value.promoTerms)) &&
   isRecord(value.coordinates) &&
   typeof value.coordinates.longitude === 'number' &&
   Number.isFinite(value.coordinates.longitude) &&
@@ -72,7 +73,7 @@ export const parsePartnerPlacements = (
   const placements = payload as unknown as PartnerPlacements;
   return {
     ...placements,
-    points: placements.points.map(point => ({...point, promoCode: point.promoCode ?? null})),
+    points: placements.points.map(point => ({...point, promoCode: point.promoCode ?? null, promoTerms: point.promoTerms ?? null})),
   };
 };
 
@@ -84,7 +85,7 @@ export const partnerPlacementRepository = {
     if (!isPoint(point) || !isRecord(point) || point.cityId !== cityId) {
       throw new Error('API returned invalid partner point');
     }
-    return {...point, promoCode: point.promoCode ?? null} as unknown as PartnerPoint;
+    return {...point, promoCode: point.promoCode ?? null, promoTerms: point.promoTerms ?? null} as unknown as PartnerPoint;
   },
   async recordInteraction(action: 'POINT_OPEN' | 'CONTACT_CLICK' | 'BANNER_IMPRESSION' | 'BANNER_CLICK', targetId: string, contactId?: string): Promise<void> {
     await httpRequest('/partner-placements/interaction', {
