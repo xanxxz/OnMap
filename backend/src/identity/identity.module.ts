@@ -14,6 +14,11 @@ import { IdentityTrackingService } from './identity-tracking.service';
     AnonymousIdentityGuard,
     ActorRestrictionGuard,
   ],
-  exports: [IdentityService, AnonymousIdentityGuard, ActorRestrictionGuard],
+  exports: [
+    IdentityService,
+    IdentityTrackingService,
+    AnonymousIdentityGuard,
+    ActorRestrictionGuard,
+  ],
 })
 export class IdentityModule {}
