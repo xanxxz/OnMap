@@ -1,0 +1,250 @@
+.page {
+  min-width: 320px;
+  overflow: clip;
+  background: #f7f4eb;
+  color: #073b30;
+}
+.hero {
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
+  height: clamp(490px, 40vw, 580px);
+  background: #d8ea70;
+}
+.heroRibbon {
+  position: absolute;
+  z-index: 3;
+  top: 78px;
+  right: -5%;
+  display: block;
+  width: clamp(660px, 73vw, 1130px);
+  height: auto;
+  pointer-events: none;
+}
+.hero::after {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 65px;
+  background: url('/art/sssvam-wave.svg') center bottom / 100% 100% no-repeat;
+  content: '';
+  pointer-events: none;
+}
+.heroContent,
+.workInner,
+.finaleInner { width: min(1390px, calc(100% - 112px)); margin-inline: auto; }
+.heroContent { position: relative; z-index: 2; padding-top: clamp(34px, 4vw, 58px); }
+.hero h1,
+.work h2,
+.project h3,
+.finale h2 { font-weight: 900; letter-spacing: -.018em; }
+.hero h1 {
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  color: #033b2e;
+  font-size: clamp(135px, 19vw, 285px);
+  line-height: .82;
+  white-space: nowrap;
+}
+.heroIntro {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 22px;
+  scroll-margin-top: 100px;
+}
+.heroIntro p { margin: 0 0 5px; font-size: clamp(18px, 1.8vw, 25px); line-height: 1.2; }
+.heroIntro strong {
+  display: block;
+  max-width: 820px;
+  font-size: clamp(30px, 3.2vw, 46px);
+  font-weight: 900;
+  letter-spacing: -.02em;
+  line-height: 1.08;
+}
+.textLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  width: fit-content;
+  padding: 0 2px 8px 0;
+  border-bottom: 2px solid currentColor;
+  color: inherit;
+  font-size: clamp(17px, 1.35vw, 20px);
+  font-weight: 700;
+  line-height: 1.15;
+  text-decoration: none;
+  transition: gap .25s ease, color .25s ease;
+}
+.textLink:hover { gap: 33px; color: #f07158; }
+.textLink span { font-size: 1.25em; font-weight: 400; line-height: .8; }
+.heroIntro .textLink { margin-top: 30px; }
+.work { position: relative; z-index: 1; margin-top: -1px; padding: 28px 0 0; background: #f7f4eb; scroll-margin-top: 90px; }
+.work h2 { position: relative; z-index: 2; margin: 0; font-size: clamp(65px, 7.8vw, 113px); line-height: .98; }
+.work h2 span,
+.finale h2 span { color: #f4775d; }
+.project { position: relative; display: grid; grid-template-columns: minmax(0, 50%) minmax(0, 50%); align-items: center; }
+.projectOnmap { min-height: clamp(390px, 34vw, 510px); margin-top: 10px; }
+.onmapVisual {
+  position: relative;
+  isolation: isolate;
+  width: 112%;
+  margin-left: -6%;
+}
+.onmapVisual::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: url('/art/onmap-ribbon-scene.svg?v=4') center / 100% 100% no-repeat;
+  content: '';
+  transform-origin: 50% 55%;
+  transition: transform .7s cubic-bezier(.2,.75,.2,1);
+}
+.bgoVisual img { display: block; width: 100%; height: auto; }
+.projectOnmap:hover .onmapVisual::before { transform: translate3d(4px, -3px, 0) rotate(.25deg); }
+.projectOnmap:hover .onmapVisual [data-onmap-stage] { transform: translateY(1px); }
+.projectOnmap:hover .onmapVisual [data-onmap-shadow] { transform: translate(1px, 2px) scale(.99); opacity: .9; }
+.projectOnmap:hover .onmapVisual [data-onmap-phone] { transform: translateY(-3px) rotate(-.18deg); }
+.onmapCopy { position: relative; z-index: 2; align-self: center; padding: 0 0 10px 32px; }
+.project h3 { margin: 0 0 4px; font-size: clamp(65px, 7.6vw, 110px); line-height: .93; }
+.project p { margin: 0; font-size: clamp(21px, 2.1vw, 29px); line-height: 1.2; }
+.project .textLink { margin-top: 28px; }
+.projectBgo {
+  min-height: clamp(430px, 37vw, 550px);
+  grid-template-columns: minmax(0, 39%) minmax(0, 61%);
+  margin-top: 5px;
+}
+.bgoCopy { position: relative; z-index: 2; align-self: center; padding-bottom: 15px; }
+.bgoCopy h3 { font-size: clamp(52px, 6vw, 86px); }
+.bgoVisual { position: relative; width: 108%; margin-left: -3%; }
+.bgoVisual img { object-fit: contain; transition: transform .5s cubic-bezier(.2,.75,.2,1); }
+.projectBgo:hover .bgoVisual img { transform: translateY(-7px) rotate(.5deg); }
+.finale {
+  position: relative;
+  min-height: clamp(280px, 23vw, 340px);
+  overflow: hidden;
+  background: #063d31 url('/art/home-hero-scene.webp') no-repeat 78% 46% / cover;
+  color: #f7f4eb;
+}
+.finale::before {
+  position: absolute;
+  z-index: 2;
+  top: -25px;
+  left: -6%;
+  width: 112%;
+  height: 49px;
+  border-radius: 0 0 50% 50% / 0 0 80% 80%;
+  background: #f7f4eb;
+  content: '';
+  transform: rotate(-1deg);
+}
+.finale::after {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: linear-gradient(90deg, #063d31f2 0%, #063d31a8 56%, transparent 100%);
+  content: '';
+  pointer-events: none;
+}
+.finaleInner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+  min-height: inherit;
+  padding-block: 50px 32px;
+}
+.finale h2 { margin: 0; font-size: clamp(63px, 7.8vw, 112px); line-height: .94; }
+.finale p { margin: 5px 0 0 4px; font-size: 20px; }
+.finaleButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 22px;
+  flex: none;
+  min-height: 54px;
+  padding: 12px 19px;
+  border-radius: 999px;
+  background: #d8ea70;
+  color: #073b30;
+  font-size: 18px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 8px 22px #08281b38;
+  transition: background .25s ease, gap .25s ease, transform .25s ease;
+}
+.finaleButton:hover { gap: 27px; background: #f7f4eb; transform: translateY(-2px); }
+.finaleButton:active { transform: scale(.97); }
+.finaleButton span { font-size: 23px; line-height: .7; }
+
+@media (max-width: 1000px) {
+  .heroContent,
+  .workInner,
+  .finaleInner { width: calc(100% - 72px); }
+  .hero { height: 510px; }
+  .hero h1 { font-size: clamp(145px, 19vw, 195px); }
+  .heroRibbon { width: 790px; right: -130px; }
+  .heroIntro strong { font-size: 32px; }
+  .projectOnmap { min-height: 390px; }
+  .projectBgo { min-height: 420px; }
+  .bgoVisual { width: 110%; }
+}
+@media (min-width: 1280px) {
+  .bgoCopy h3 { font-size: 5.4vw; white-space: nowrap; }
+}
+@media (min-width: 701px) and (max-width: 850px) {
+  .heroIntro strong { max-width: 420px; }
+}
+@media (max-width: 700px) {
+  .heroContent,
+  .workInner,
+  .finaleInner { width: calc(100% - 40px); }
+  .hero { height: 525px; }
+  .heroContent { padding-top: 42px; }
+  .hero h1 { font-size: clamp(73px, 20vw, 130px); letter-spacing: -.018em; }
+  .heroRibbon { top: 205px; right: -40px; width: 650px; }
+  .heroIntro { margin-top: 18px; }
+  .heroIntro p { font-size: 17px; }
+  .heroIntro strong { max-width: 380px; font-size: clamp(27px, 6vw, 39px); line-height: 1.07; }
+  .heroIntro .textLink { margin-top: 23px; }
+  .hero::after { height: 55px; }
+  .work { padding-top: 26px; }
+  .work h2 { font-size: clamp(52px, 11.3vw, 78px); line-height: .94; }
+  .project,
+  .projectBgo { display: flex; flex-direction: column; align-items: stretch; }
+  .projectOnmap { min-height: 0; margin-top: 22px; }
+  .onmapVisual { width: calc(100% + 46px); margin-left: -25px; }
+  .onmapCopy { align-self: flex-start; padding: 0 0 25px; margin-top: -4px; }
+  .project h3 { font-size: clamp(66px, 14vw, 90px); }
+  .project p { font-size: 20px; }
+  .project .textLink { margin-top: 20px; }
+  .projectBgo { min-height: 0; margin-top: 34px; }
+  .bgoCopy { align-self: flex-start; padding: 0; }
+  .bgoCopy h3 { font-size: clamp(52px, 10vw, 73px); }
+  .bgoVisual { width: calc(100% + 34px); margin: 14px -17px 0; }
+  .finale { min-height: 300px; background-position: 68% center; }
+  .finale::after { background: linear-gradient(90deg, #063d31f2 0%, #063d31ce 72%, #063d3140 100%); }
+  .finaleInner { align-items: flex-start; flex-direction: column; justify-content: center; gap: 20px; padding-top: 54px; }
+  .finale h2 { font-size: clamp(58px, 11vw, 78px); }
+  .finale p { font-size: 18px; }
+  .finaleButton { min-height: 47px; padding: 10px 17px; font-size: 16px; }
+}
+@media (max-width: 390px) {
+  .hero h1 { font-size: 19.7vw; }
+  .heroIntro strong { font-size: 26px; }
+  .work h2 { font-size: 11vw; }
+  .bgoCopy h3 { font-size: 10vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .textLink, .bgoVisual img, .finaleButton, .onmapVisual::before { transition: none; }
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#183d32"/>
+  <g fill="none" stroke="#506f5b" stroke-width="2" opacity=".75"><circle cx="989" cy="320" r="230"/><circle cx="989" cy="320" r="175"/><circle cx="989" cy="320" r="118"/></g>
+  <rect x="929" y="260" width="120" height="120" rx="27" fill="#c7d36a"/>
+  <path d="M969 286v70m0-28c0-16 10-26 24-26 15 0 26 11 26 27s-11 27-26 27c-14 0-24-10-24-26" fill="none" stroke="#183d32" stroke-width="13" stroke-linecap="round"/>
+  <circle cx="995" cy="329" r="7" fill="#e27759"/>
+  <text x="72" y="90" fill="#c7d36a" font-family="Arial, sans-serif" font-weight="700" font-size="25" letter-spacing="3">BALAKOVO-GO.RU</text>
+  <text x="61" y="310" fill="#f4f1e9" font-family="Arial, sans-serif" font-weight="700" font-size="146" letter-spacing="-10">balakovo</text>
+  <text x="69" y="473" fill="#c7d36a" font-family="Arial, sans-serif" font-weight="700" font-size="180" letter-spacing="-11">go<tspan fill="#e27759">.</tspan></text>
+  <text x="73" y="562" fill="#c9d7c8" font-family="Arial, sans-serif" font-size="26">Сайт проектов в Балакове</text>
+</svg>

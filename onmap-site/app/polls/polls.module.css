@@ -1,0 +1,36 @@
+.page{min-height:100svh;background:#f8f6ee;color:#0b3028}
+.hero{position:relative;min-height:max(780px,calc(100svh - 188px));overflow:hidden;background:#f8f6ee}
+.intro{position:relative;z-index:2;width:min(1390px,calc(100% - 112px));margin:0 auto;padding-top:50px}
+.breadcrumbs{display:flex;align-items:center;gap:17px;color:#6b7269;font-size:13px;line-height:1.2}
+.breadcrumbs a{text-decoration:none}.breadcrumbs a:hover{text-decoration:underline;text-underline-offset:3px}
+.intro h1{position:relative;max-width:100%;margin:34px 0 0;font-size:clamp(72px,9vw,126px);font-weight:900;line-height:.95;letter-spacing:0}
+.intro h1>span{display:block;white-space:nowrap}
+.intro h1 em{position:relative;z-index:0;font-style:normal}
+.intro h1 em::before{position:absolute;z-index:-1;top:23%;right:13%;bottom:3%;left:-4%;border-radius:50%;background:#d4ec70;transform:rotate(-1.4deg);content:''}
+.intro p{margin:23px 0 0;font-size:clamp(21px,2.5vw,30px);font-weight:400;line-height:1.22;letter-spacing:-.035em}
+.scene{position:absolute;z-index:0;inset:0;background:url('/art/polls-scene.webp') center top/cover no-repeat}
+.empty{position:absolute;z-index:2;top:67%;left:max(62px,calc((100vw - 1390px)/2));max-width:550px}
+.empty h2{margin:0;font-size:clamp(37px,3.85vw,50px);font-weight:900;line-height:.98;letter-spacing:-.005em}
+.empty p{margin:13px 0 0;font-size:clamp(19px,2vw,25px);line-height:1.24;letter-spacing:-.035em}
+.empty a{display:inline-flex;align-items:center;gap:19px;margin-top:35px;padding-bottom:7px;border-bottom:2px solid currentColor;font-size:clamp(17px,1.7vw,21px);font-weight:680;line-height:1.2;text-decoration:none;transition:gap .2s ease,color .2s ease}
+.empty a:hover{gap:26px;color:#d95c45}
+.wave{position:absolute;z-index:1;right:0;bottom:-1px;left:0;width:100%;height:55px;fill:#103c31}
+@media(max-width:1100px){.intro h1{font-size:clamp(68px,9vw,102px)}.empty{top:68%}}
+@media(min-width:701px) and (max-width:1100px){.empty{top:64%;max-width:310px}.empty h2{font-size:34px}}
+@media(max-width:700px){
+  .hero{min-height:0;padding-bottom:48px;overflow:hidden}
+  .intro{width:calc(100% - 40px);padding-top:45px}
+  .breadcrumbs{gap:14px;font-size:12px}
+  .intro h1{margin-top:18px;font-size:clamp(38px,10.2vw,58px);line-height:.98;letter-spacing:0}
+  .intro h1>span{white-space:nowrap}
+  .intro h1 em::before{top:27%;right:-3%;bottom:0;left:-5%}
+  .intro p{margin-top:15px;font-size:17px;line-height:1.25;letter-spacing:-.025em}
+  .scene{position:relative;inset:auto;width:100%;height:clamp(265px,72vw,355px);margin-top:14px;background-image:url('/art/polls-mobile-scene.webp');background-size:cover;background-position:center}
+  .empty{position:relative;top:auto;left:auto;max-width:none;margin:12px 20px 0}
+  .empty h2{font-size:clamp(29px,8.5vw,42px);line-height:.98;letter-spacing:0}
+  .empty p{margin-top:11px;font-size:16px;line-height:1.25}
+  .empty a{gap:17px;margin-top:24px;padding-bottom:5px;font-size:17px}
+  .wave{display:none}
+}
+@media(max-width:390px){.intro{width:calc(100% - 36px)}.empty{margin-left:18px;margin-right:18px}}
+@media(prefers-reduced-motion:reduce){.empty a{transition:none}}

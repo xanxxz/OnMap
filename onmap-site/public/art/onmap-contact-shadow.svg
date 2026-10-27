@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" fill="none">
+  <defs>
+    <radialGradient id="soft-shadow" cx="0" cy="0" r="1" gradientTransform="translate(0.5 0.5) rotate(90) scale(0.5)">
+      <stop stop-color="#071812" stop-opacity=".42" />
+      <stop offset=".48" stop-color="#071812" stop-opacity=".21" />
+      <stop offset="1" stop-color="#071812" stop-opacity="0" />
+    </radialGradient>
+    <filter id="blur" x="-25%" y="-100%" width="150%" height="300%">
+      <feGaussianBlur stdDeviation="15" />
+    </filter>
+  </defs>
+  <ellipse cx="828" cy="847" rx="318" ry="66" transform="rotate(-9 828 847)" fill="url(#soft-shadow)" filter="url(#blur)" />
+  <ellipse cx="870" cy="871" rx="218" ry="24" transform="rotate(-9 870 871)" fill="#071812" fill-opacity=".2" filter="url(#blur)" />
+</svg>

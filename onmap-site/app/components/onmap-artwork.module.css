@@ -1,0 +1,30 @@
+.scene {
+  position: relative;
+  isolation: isolate;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  z-index: 1;
+  pointer-events: none;
+}
+.stageMask,
+.phoneGroup {
+  position: absolute;
+  inset: 0;
+}
+.stageMask { z-index: 1; overflow: hidden; transition: transform .55s cubic-bezier(.2,.75,.2,1); }
+.contactShadow { z-index: 2; object-fit: contain; transition: transform .55s cubic-bezier(.2,.75,.2,1), opacity .55s ease; }
+.phoneGroup {
+  z-index: 3;
+  transform-origin: 52% 78%;
+  transition: transform .45s cubic-bezier(.2,.75,.2,1);
+}
+.stageMask img,
+.phoneGroup img { object-fit: contain; }
+.screenLayer { z-index: 0; }
+.phoneGroup img:not(.screenLayer) { z-index: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .stageMask,
+  .contactShadow,
+  .phoneGroup { transition: none; }
+}

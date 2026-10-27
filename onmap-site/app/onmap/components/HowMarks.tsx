@@ -1,0 +1,11 @@
+'use client';
+import { useState } from 'react';
+import Image from 'next/image';
+import { CaretDown, UsersThree, Flag, EyeSlash } from '@phosphor-icons/react';
+import styles from '../experience.module.css';
+const steps=[
+ {title:'Тип и место',text:'Выберите событие и точку на карте.',caption:'Данные добавляют участники',label:'ДТП'},
+ {title:'Обратная связь',text:'Другие участники могут сообщить об изменении или пожаловаться.',caption:'Обратную связь отправляют из приложения',label:'Сообщить об изменении'},
+ {title:'Рассмотрение',text:'После 10 жалоб с разных идентификаторов отметка скрывается до решения владельца.',caption:'Решение принимает владелец вручную',label:'Скрыта до рассмотрения'},
+];
+export function HowMarks(){const[open,setOpen]=useState<number|null>(0);return <section className={styles.how} id="how-it-works" aria-labelledby="how-title"><div className={styles.howIntro}><p className={styles.kicker}>Отметки сообщества</p><h2 id="how-title">Как<br className={styles.desktopBreak}/> работают<br/><span>метки.</span></h2><p>Событие видно там, где его отметили.</p></div><ol className={styles.steps}>{steps.map((step,i)=><li key={step.title} data-open={open===i}><button className={styles.stepButton} type="button" aria-expanded={open===i} aria-controls={`step-panel-${i}`} id={`step-button-${i}`} onClick={()=>setOpen(open===i?null:i)}><span className={styles.stepNumber}>0{i+1}</span><span className={styles.stepTitle}>{step.title}</span><CaretDown size={25} aria-hidden="true"/></button><p className={styles.stepText}>{step.text}</p><div className={styles.stepReveal} id={`step-panel-${i}`} role="region" aria-labelledby={`step-button-${i}`} inert={open!==i}><div><div className={styles.stepMap} data-step={i}><Image src="/art/crossroads-atlas.webp" alt="Условная иллюстрация отметки на перекрёстке" fill sizes="(max-width: 700px) 100vw, 52vw"/><div className={styles.stepMarker}><span>{step.label}</span><Image src="/markers/ACCIDENT.png" alt="" width={95} height={95}/>{i===1&&<Flag size={24} weight="fill" aria-hidden="true"/>}{i===2&&<EyeSlash size={26} aria-hidden="true"/>}</div></div><p className={styles.stepCaption}><UsersThree size={23} weight="fill" aria-hidden="true"/>{step.caption}</p></div></div></li>)}</ol></section>}

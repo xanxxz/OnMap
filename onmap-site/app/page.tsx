@@ -1,43 +1,39 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import Image from 'next/image';
+import GoHeader from './components/GoHeader';
+import GoFooter from './components/GoFooter';
+import ProjectRail from './components/ProjectRail';
 import styles from './site.module.css';
 
 export const metadata: Metadata = {
-  title: 'balakovo-go.ru — главная',
-  description: 'Главная страница balakovo-go.ru. Сейчас здесь доступен проект OnMap.',
+  title: 'Балаково Go — есть идеи',
+  description: 'Полезные цифровые проекты для Балаково. OnMap и новые идеи рядом.',
 };
 
 export default function Home() {
   return <div className={styles.site}>
-    <a className={styles.skip} href="#main">К содержанию</a>
-    <header className={styles.header}>
-      <Link className={styles.wordmark} href="/">balakovo-go.ru</Link>
-      <nav aria-label="Основная навигация"><Link className={styles.headerLink} href="/onmap/">Открыть OnMap <span aria-hidden="true">↗</span></Link></nav>
-    </header>
+    <GoHeader />
     <main id="main">
       <section className={styles.hero} aria-labelledby="home-title">
-        <div className={styles.heroText}>
-          <p className={styles.kicker}>Главная страница</p>
-          <h1 id="home-title">Здесь начинается <em>balakovo-go.ru</em></h1>
-          <p className={styles.lead}>Сейчас на сайте доступен OnMap — карта дорожных событий. У приложения свой раздел со страницей загрузки, поддержкой и документами.</p>
-          <Link className={styles.primaryLink} href="/onmap/">Перейти в OnMap <span aria-hidden="true">↗</span></Link>
+        <div className={styles.heroInner}>
+          <h1 id="home-title"><span>Балаково<i>.</i></span><span>Есть идеи<i>.</i></span></h1>
+          <p>Полезные штуки для своего города.</p>
+          <a className={styles.textLink} href="#projects">Смотреть проекты <span aria-hidden="true">↘</span></a>
+          <Link className={styles.madeBy} href="/sssvam/">сделано<br />sssvam</Link>
         </div>
-        <div className={styles.heroAside} aria-hidden="true"><span>01</span><span>Доступный проект</span><div className={styles.line} /></div>
       </section>
-      <section className={styles.project} aria-labelledby="project-title">
-        <div className={styles.projectText}>
-          <span className={styles.projectIndex}>01 / OnMap</span>
-          <h2 id="project-title">Дорожные события<br/>на одной карте</h2>
-          <p>Смотреть отметки, добавлять события и помогать другим понять, остаётся ли информация актуальной.</p>
-          <Link className={styles.textLink} href="/onmap/">О проекте <span aria-hidden="true">↗</span></Link>
-        </div>
-        <div className={styles.projectVisual}>
-          <Image src="/map-atlas.svg" alt="Иллюстрация карты дорог и реки" fill sizes="(max-width: 800px) 100vw, 45vw" />
-          <span className={styles.visualLabel}>OnMap · иллюстрация карты</span>
+
+      <section className={styles.projects} id="projects" aria-labelledby="projects-title">
+        <ProjectRail />
+      </section>
+
+      <section className={styles.pollBanner} aria-labelledby="poll-title">
+        <div className={styles.pollBannerInner}>
+          <h2 id="poll-title">Что дальше?</h2>
+          <Link className={styles.pollLink} href="/polls/">Опросы скоро <span aria-hidden="true">↗</span></Link>
         </div>
       </section>
     </main>
-    <footer className={styles.footer}><span>balakovo-go.ru</span><Link href="/onmap/">OnMap <span aria-hidden="true">↗</span></Link></footer>
+    <GoFooter />
   </div>;
 }

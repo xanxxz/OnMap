@@ -8,5 +8,6 @@ function publicLink(value: string | undefined): string | undefined {
   }
 }
 
-export const androidApkUrl = publicLink(process.env.NEXT_PUBLIC_ANDROID_APK_URL);
+// Local, versioned release asset in public/. Hosting serves it at this stable path.
+export const androidApkUrl = '/onmap/downloads/onmap-android.apk';
 export const appStoreUrl = publicLink(process.env.NEXT_PUBLIC_APP_STORE_URL);

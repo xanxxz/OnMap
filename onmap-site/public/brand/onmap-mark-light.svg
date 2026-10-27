@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Знак OnMap">
+  <path d="M32 5C19.3 5 9 15.3 9 28c0 16.3 23 31 23 31s23-14.7 23-31C55 15.3 44.7 5 32 5Z" fill="#c7d36a"/>
+  <path d="M18 28h28M32 15v28" fill="none" stroke="#12392f" stroke-width="5.6" stroke-linecap="round"/>
+  <circle cx="32" cy="28" r="5.6" fill="#e27759" stroke="#12392f" stroke-width="2"/>
+</svg>

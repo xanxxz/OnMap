@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#d4ddc4"/>
+  <text x="60" y="70" fill="#45644a" font-family="Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="3">SSSVAM · БАЛАКОВО</text>
+  <text x="46" y="330" fill="#183d32" font-family="Arial, sans-serif" font-size="290" font-weight="800" letter-spacing="-25">sss</text>
+  <text x="300" y="535" fill="#5b753f" font-family="Arial, sans-serif" font-size="290" font-weight="800" letter-spacing="-25">vam</text>
+  <circle cx="870" cy="505" r="34" fill="#e27759"/>
+  <path d="M60 575H1140" stroke="#9eb492" stroke-width="2"/>
+  <text x="60" y="610" fill="#365741" font-family="Arial, sans-serif" font-size="20" font-weight="700">СЕРВИСЫ · ПРИЛОЖЕНИЯ · ЗАПУСК</text>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#e5e8d8"/>
+  <path d="M674 0C724 118 776 216 892 236s199-73 308-39" fill="none" stroke="#d1ded0" stroke-width="155"/>
+  <path d="M695-20c-56 176-23 281 142 353s242 104 420 150" fill="none" stroke="#f8f8f1" stroke-width="63"/>
+  <path d="M608 557c157-125 249-147 381-111s176 81 241 66" fill="none" stroke="#f8f8f1" stroke-width="48"/>
+  <path d="M953 43c-19 182-26 350 46 607" fill="none" stroke="#f8f8f1" stroke-width="40"/>
+  <path d="M952 166c-30 0-55 25-55 55 0 39 55 77 55 77s55-38 55-77c0-30-25-55-55-55Z" fill="#183d32"/>
+  <path d="M923 220h58m-29-29v58" fill="none" stroke="#f4f1e9" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="952" cy="220" r="9" fill="#e27759"/>
+  <text x="72" y="93" fill="#54705c" font-family="Arial, sans-serif" font-weight="700" font-size="25" letter-spacing="3">BALAKOVO-GO.RU / ONMAP</text>
+  <text x="61" y="285" fill="#183d32" font-family="Arial, sans-serif" font-weight="700" font-size="160" letter-spacing="-10">OnMap</text>
+  <text x="72" y="366" fill="#54705c" font-family="Arial, sans-serif" font-size="40">Карта дорожных событий</text>
+  <path d="M72 471h554" stroke="#91a692" stroke-width="2"/>
+  <text x="72" y="526" fill="#54705c" font-family="Arial, sans-serif" font-size="27">Отметки сообщества на карте</text>
+</svg>
