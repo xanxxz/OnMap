@@ -66,6 +66,7 @@ export interface NormalizedTelegramEvent {
   readonly parserConfidence: number;
   readonly contextUsed: boolean;
   readonly replyContextUsed: boolean;
+  readonly replyToExternalId?: string;
   readonly resolverStatus: TelegramIngestionResolverStatus;
   readonly decision: TelegramIngestionDecision;
   readonly reason: TelegramIngestionDecisionReason;

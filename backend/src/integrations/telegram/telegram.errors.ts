@@ -3,6 +3,7 @@ export type TelegramIntegrationErrorCode =
   | 'AUTH_FAILED'
   | 'SOURCE_NOT_FOUND'
   | 'CONNECTION_ERROR'
+  | 'OPERATION_TIMEOUT'
   | 'INVALID_SESSION';
 
 export class TelegramIntegrationError extends Error {

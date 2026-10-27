@@ -32,6 +32,13 @@ import {
   TELEGRAM_INGESTION_ENABLED_ENV,
   TELEGRAM_RUNTIME_CONTEXT_SEED_LIMIT,
   TELEGRAM_RUNTIME_SHUTDOWN_TIMEOUT_MS,
+  TELEGRAM_RUNTIME_MAX_IN_FLIGHT,
+  TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+  TELEGRAM_RUNTIME_SYNC_STALE_MS,
+  TELEGRAM_RUNTIME_WORKER_TIMEOUT_MS,
+  TELEGRAM_RUNTIME_RECONNECT_FAILURES,
+  TELEGRAM_RUNTIME_RETRY_MAX_MS,
+  TELEGRAM_RUNTIME_HEARTBEAT_MS,
 } from './telegram-ingestion-runtime.constants';
 import type {
   TelegramIngestionRuntimeCounters,
@@ -61,6 +68,7 @@ export class TelegramIngestionRuntimeService
   private readonly sourceQueues = new Map<string, Promise<void>>();
   private readonly cursors = new Map<string, TelegramSourceCursor>();
   private readonly recoveryRequired = new Set<string>();
+  private readonly incompleteSources = new Set<string>();
   private readonly failedVersions = new Map<
     string,
     {
@@ -76,6 +84,24 @@ export class TelegramIngestionRuntimeService
   private removeReconnectListener: (() => void) | null = null;
   private startupPromise: Promise<void> | null = null;
   private shutdownPromise: Promise<void> | null = null;
+  private supervisorTimer: NodeJS.Timeout | undefined;
+  private supervisionPromise: Promise<void> | null = null;
+  private supervisionStartedAt: number | null = null;
+  private startupStartedAt: number | null = null;
+  private readonly taskStartedAt = new Map<string, number>();
+  private lastSuccessfulSyncAt: number | null = null;
+  private lastProcessedAt: number | null = null;
+  private listenerStartedAt = 0;
+  private lastLiveAt: number | null = null;
+  private recoveredLiveGapAt: number | null = null;
+  private consecutiveTransportFailures = 0;
+  private sourceRestarts = 0;
+  private sourceNeedsRestart = false;
+  private retryAttempt = 0;
+  private retryAt = 0;
+  private lastHeartbeatAt = 0;
+  private shuttingDown = false;
+  private restartRequested = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -90,6 +116,13 @@ export class TelegramIngestionRuntimeService
   ) {}
 
   onApplicationBootstrap(): Promise<void> {
+    if (this.isEnabled() && this.supervisorTimer === undefined) {
+      this.supervisorTimer = setInterval(
+        () => this.supervise(),
+        TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      this.supervisorTimer.unref();
+    }
     return this.start();
   }
 
@@ -106,7 +139,10 @@ export class TelegramIngestionRuntimeService
       return Promise.resolve();
     }
 
+    this.startupStartedAt = Date.now();
     this.startupPromise = this.startInternal().finally(() => {
+      this.startupStartedAt = null;
+      if (this.status !== 'RUNNING') this.deferRetry();
       this.startupPromise = null;
     });
 
@@ -130,8 +166,22 @@ export class TelegramIngestionRuntimeService
       this.counters.ignored += 1;
       return;
     }
+    this.lastLiveAt = Date.now();
+
+    if (this.inFlight.size >= TELEGRAM_RUNTIME_MAX_IN_FLIGHT) {
+      // The independent reconciliation will retrieve this message from Telegram.
+      this.recoveryRequired.add(sourceKey(source));
+      return;
+    }
 
     await this.enqueueSourceTask(source, async () => {
+      const cursor = this.cursors.get(sourceKey(source));
+      if (
+        cursor !== undefined &&
+        telegramMessageId(message) > BigInt(cursor.lastMessageId) + 1n
+      ) {
+        this.recoveryRequired.add(sourceKey(source));
+      }
       if (this.recoveryRequired.has(sourceKey(source))) {
         try {
           await this.recoverSource(source);
@@ -157,10 +207,39 @@ export class TelegramIngestionRuntimeService
       connection: this.source.getConnectionSnapshot(),
       counters: { ...this.counters },
       inFlight: this.inFlight.size,
+      supervision: {
+        lastSuccessfulSyncAt: isoOrNull(this.lastSuccessfulSyncAt),
+        lastProcessedAt: isoOrNull(this.lastProcessedAt),
+        pendingRecoverySources: this.recoveryRequired.size,
+        consecutiveTransportFailures: this.consecutiveTransportFailures,
+        sourceRestarts: this.sourceRestarts,
+      },
+    };
+  }
+
+  getHealth(): {
+    status: 'ok' | 'disabled' | 'degraded';
+    runtimeStatus: TelegramIngestionRuntimeStatus;
+    lastSuccessfulSyncAt: string | null;
+    lastProcessedAt: string | null;
+  } {
+    const healthy =
+      this.status === 'RUNNING' &&
+      !this.sourceNeedsRestart &&
+      this.incompleteSources.size === 0 &&
+      this.lastSuccessfulSyncAt !== null &&
+      Date.now() - this.lastSuccessfulSyncAt < TELEGRAM_RUNTIME_SYNC_STALE_MS;
+    return {
+      status: !this.isEnabled() ? 'disabled' : healthy ? 'ok' : 'degraded',
+      runtimeStatus: this.status,
+      lastSuccessfulSyncAt: isoOrNull(this.lastSuccessfulSyncAt),
+      lastProcessedAt: isoOrNull(this.lastProcessedAt),
     };
   }
 
   shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    if (this.supervisorTimer !== undefined) clearInterval(this.supervisorTimer);
     if (this.shutdownPromise !== null) {
       return this.shutdownPromise;
     }
@@ -190,7 +269,7 @@ export class TelegramIngestionRuntimeService
           this.logger.error(
             'Telegram ingestion runtime stopping: singleton lock connection lost',
           );
-          void this.shutdown();
+          this.requestProcessRestart('SINGLETON_LOCK_LOST');
         }))
       ) {
         this.status = 'ERROR';
@@ -218,6 +297,7 @@ export class TelegramIngestionRuntimeService
       }
       const history = await this.source.getRecentMessages(
         TELEGRAM_RUNTIME_CONTEXT_SEED_LIMIT,
+        true,
       );
 
       this.context.seed(history);
@@ -235,21 +315,29 @@ export class TelegramIngestionRuntimeService
         } else {
           this.cursors.set(sourceKey(source), cursor);
           this.recoveryRequired.add(sourceKey(source));
+          this.incompleteSources.add(sourceKey(source));
         }
       }
 
       this.removeReconnectListener = this.source.onReconnected((source) => {
         this.recoveryRequired.add(sourceKey(source));
+        this.incompleteSources.add(sourceKey(source));
 
         return this.requestRecovery(source);
       });
 
       await this.source.start((message) => this.handleMessage(message));
+      this.listenerStartedAt = Date.now();
       this.status = 'RUNNING';
 
       await Promise.all(
         this.citySources.map((source) => this.requestRecovery(source)),
       );
+      // A newly initialized baseline has no backlog. Still record the successful
+      // source read so a quiet channel is not confused with a dead worker.
+      if (this.recoveryRequired.size === 0)
+        this.lastSuccessfulSyncAt = Date.now();
+      this.retryAttempt = 0;
       this.logger.log('Telegram ingestion runtime started');
     } catch (error: unknown) {
       this.status = 'ERROR';
@@ -281,7 +369,7 @@ export class TelegramIngestionRuntimeService
       let persistenceResult: TelegramPersistenceResult | null = null;
 
       try {
-        persistenceResult = await this.processEvent(event);
+        persistenceResult = await this.processEvent(event, ingestionSource);
       } finally {
         await this.writeReviewLog(
           message,
@@ -318,21 +406,25 @@ export class TelegramIngestionRuntimeService
 
   private async processEvent(
     event: NormalizedTelegramEvent,
+    ingestionSource: TelegramIngestionSource,
   ): Promise<TelegramPersistenceResult | null> {
     this.trackDpsObservation(event);
 
     if (!TELEGRAM_INGESTION_SUPPORTED_EVENT_TYPES.includes(event.eventType)) {
       this.counters.ignored += 1;
+      this.logDecision(event, 'UNSUPPORTED', ingestionSource);
       return null;
     }
 
     if (event.decision === 'IGNORE') {
       this.counters.ignored += 1;
+      this.logDecision(event, 'NONE', ingestionSource);
       return null;
     }
 
     if (event.decision === 'REVIEW') {
       this.counters.reviewed += 1;
+      this.logDecision(event, 'NONE', ingestionSource);
       return null;
     }
 
@@ -340,9 +432,7 @@ export class TelegramIngestionRuntimeService
     const result = await this.realtimeBridge.apply(event);
 
     this.countPersistence(result);
-    this.logger.log(
-      `Telegram ingestion externalId=${safeExternalId(event.externalId)} eventType=${event.eventType} decision=${event.decision} persistence=${result.status}`,
-    );
+    this.logDecision(event, result.status, ingestionSource);
 
     return result;
   }
@@ -416,6 +506,7 @@ export class TelegramIngestionRuntimeService
     this.citySources = [];
     this.cursors.clear();
     this.recoveryRequired.clear();
+    this.incompleteSources.clear();
     this.failedVersions.clear();
     this.status = 'STOPPED';
   }
@@ -444,10 +535,6 @@ export class TelegramIngestionRuntimeService
     }
 
     this.cursors.set(key, cursor);
-    this.logger.log(
-      `Telegram recovery started city=${safeLogValue(source.cityId)} fromMessage=${safeLogValue(cursor.lastMessageId)}`,
-    );
-
     const batch = await this.source.getMessagesAfter(
       source,
       cursor,
@@ -474,7 +561,7 @@ export class TelegramIngestionRuntimeService
     } catch (error: unknown) {
       this.recoveryRequired.add(key);
       this.logger.warn(
-        `Telegram recovery incomplete city=${safeLogValue(source.cityId)} fetched=${batch.messages.length} processed=${processed} duplicates=${duplicates} failed=1 cursor=${safeLogValue(this.cursors.get(key)?.lastMessageId ?? cursor.lastMessageId)}`,
+        `Telegram recovery incomplete city=${safeLogValue(source.cityId)} fetched=${batch.messages.length} processed=${processed} duplicates=${duplicates} failed=1`,
       );
       throw error;
     }
@@ -482,24 +569,29 @@ export class TelegramIngestionRuntimeService
     if (this.failedVersions.has(key)) {
       this.recoveryRequired.add(key);
       this.logger.warn(
-        `Telegram recovery incomplete city=${safeLogValue(source.cityId)} fetched=${batch.messages.length} processed=${processed} duplicates=${duplicates} failed=1 cursor=${safeLogValue(this.cursors.get(key)?.lastMessageId ?? cursor.lastMessageId)}`,
+        `Telegram recovery incomplete city=${safeLogValue(source.cityId)} fetched=${batch.messages.length} processed=${processed} duplicates=${duplicates} failed=1`,
       );
       return;
     }
 
     if (batch.truncated) {
       this.recoveryRequired.add(key);
+      this.incompleteSources.add(key);
 
       this.logger.warn(
         `Telegram recovery truncated city=${safeLogValue(source.cityId)} maxMessages=${TELEGRAM_RECOVERY_MAX_MESSAGES}`,
       );
     } else {
       this.recoveryRequired.delete(key);
+      this.incompleteSources.delete(key);
+      this.lastSuccessfulSyncAt = Date.now();
     }
-
-    this.logger.log(
-      `Telegram recovery complete city=${safeLogValue(source.cityId)} fetched=${batch.messages.length} processed=${processed} duplicates=${duplicates} failed=0 cursor=${safeLogValue(this.cursors.get(key)?.lastMessageId ?? cursor.lastMessageId)}`,
-    );
+    this.consecutiveTransportFailures = 0;
+    if (processed > 0 || batch.truncated) {
+      this.logger.log(
+        `Telegram recovery complete city=${safeLogValue(source.cityId)} fetched=${batch.messages.length} processed=${processed} duplicates=${duplicates} failed=0`,
+      );
+    }
   }
 
   private async processAcceptedMessage(
@@ -524,6 +616,24 @@ export class TelegramIngestionRuntimeService
       this.cursors.set(sourceKey(source), cursor);
       this.rememberVersion(identity, version);
       this.clearFailedVersion(source, identity, version);
+      this.lastProcessedAt = Date.now();
+      const observedAt = Date.parse(message.editedAt ?? message.publishedAt);
+      if (
+        ingestionSource === 'RECOVERY' &&
+        observedAt > this.listenerStartedAt
+      ) {
+        this.recoveredLiveGapAt = Math.max(
+          this.recoveredLiveGapAt ?? 0,
+          observedAt,
+        );
+      }
+      if (this.startupStartedAt !== null) this.startupStartedAt = Date.now();
+      if (this.supervisionStartedAt !== null)
+        this.supervisionStartedAt = Date.now();
+      for (const taskId of this.taskStartedAt.keys()) {
+        if (taskId.startsWith(`${sourceKey(source)}:`))
+          this.taskStartedAt.set(taskId, Date.now());
+      }
     } catch (error: unknown) {
       this.rememberFailedVersion(source, identity, version);
       throw error;
@@ -569,14 +679,20 @@ export class TelegramIngestionRuntimeService
   ): Promise<void> {
     const key = sourceKey(source);
     const previous = this.sourceQueues.get(key) ?? Promise.resolve();
-    const queued = previous.catch(() => undefined).then(task);
     const taskId = `${key}:${this.nextTaskId++}`;
+    const queued = previous
+      .catch(() => undefined)
+      .then(() => {
+        this.taskStartedAt.set(taskId, Date.now());
+        return task();
+      });
     const cleanup = (): void => {
       if (this.sourceQueues.get(key) === queued) {
         this.sourceQueues.delete(key);
       }
 
       this.inFlight.delete(taskId);
+      this.taskStartedAt.delete(taskId);
     };
 
     this.sourceQueues.set(key, queued);
@@ -598,7 +714,7 @@ export class TelegramIngestionRuntimeService
       message.editedAt ?? message.publishedAt,
     );
     this.logger.error(
-      `Telegram runtime message failed externalId=${safeExternalId(message.externalId)} stage=PROCESS code=${safeErrorCode(error)}`,
+      `Telegram runtime message failed city=${safeLogValue(message.cityId)} stage=PROCESS code=${safeErrorCode(error)}`,
     );
   }
 
@@ -614,6 +730,7 @@ export class TelegramIngestionRuntimeService
       messageId: telegramMessageIdFromIdentity(identity),
     });
     this.recoveryRequired.add(key);
+    this.incompleteSources.add(key);
   }
 
   private isBlockedByFailedVersion(
@@ -654,7 +771,11 @@ export class TelegramIngestionRuntimeService
     error: unknown,
   ): void {
     this.counters.errors += 1;
+    if (error instanceof TelegramIntegrationError) {
+      this.consecutiveTransportFailures += 1;
+    }
     this.recoveryRequired.add(sourceKey(source));
+    this.incompleteSources.add(sourceKey(source));
     this.logger.warn(
       `Telegram recovery failed city=${safeLogValue(source.cityId)} stage=RECOVERY code=${safeErrorCode(error)}`,
     );
@@ -679,6 +800,132 @@ export class TelegramIngestionRuntimeService
         ?.trim()
         .toLowerCase() === 'true'
     );
+  }
+
+  private logDecision(
+    event: NormalizedTelegramEvent,
+    persistence: string,
+    ingestionSource: TelegramIngestionSource,
+  ): void {
+    this.logger.log(
+      `Telegram ingestion city=${safeLogValue(event.cityId)} via=${ingestionSource} eventType=${event.eventType} decision=${event.decision} reason=${event.reason} persistence=${persistence}`,
+    );
+  }
+
+  private supervise(): void {
+    if (this.shuttingDown || this.restartRequested) return;
+    const now = Date.now();
+    const active = [
+      this.startupStartedAt,
+      this.supervisionStartedAt,
+      ...this.taskStartedAt.values(),
+    ].filter((time): time is number => time !== null);
+    if (
+      active.some((time) => now - time >= TELEGRAM_RUNTIME_WORKER_TIMEOUT_MS)
+    ) {
+      this.requestProcessRestart('WORKER_TIMEOUT');
+      return;
+    }
+    if (
+      this.supervisionPromise !== null ||
+      this.startupPromise !== null ||
+      now < this.retryAt
+    )
+      return;
+    this.supervisionStartedAt = now;
+    this.supervisionPromise = this.synchronize()
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Telegram supervisor failed code=${safeErrorCode(error)}`,
+        );
+        this.deferRetry();
+      })
+      .finally(() => {
+        this.supervisionStartedAt = null;
+        this.supervisionPromise = null;
+      });
+  }
+
+  private async synchronize(): Promise<void> {
+    if (this.status !== 'RUNNING') {
+      await this.start();
+      return;
+    }
+    if (
+      this.recoveredLiveGapAt !== null &&
+      Date.now() - this.recoveredLiveGapAt >=
+        2 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS &&
+      (this.lastLiveAt === null || this.lastLiveAt < this.recoveredLiveGapAt)
+    ) {
+      this.sourceNeedsRestart = true;
+      this.logger.warn(
+        'Telegram supervisor detected missing live updates; cursor reconciliation remains active',
+      );
+    }
+    if (
+      this.sourceNeedsRestart ||
+      this.consecutiveTransportFailures >= TELEGRAM_RUNTIME_RECONNECT_FAILURES
+    ) {
+      this.sourceNeedsRestart = true;
+      await this.source.stop();
+      await this.source.disconnect();
+      if (this.shuttingDown) return;
+      await this.source.start((message) => this.handleMessage(message));
+      if (this.shuttingDown) {
+        await this.source.stop();
+        await this.source.disconnect();
+        return;
+      }
+      this.sourceRestarts += 1;
+      this.listenerStartedAt = Date.now();
+      this.recoveredLiveGapAt = null;
+      this.sourceNeedsRestart = false;
+      this.consecutiveTransportFailures = 0;
+      this.retryAttempt = 0;
+      this.logger.warn(
+        'Telegram supervisor reconnected source and restored listener',
+      );
+    }
+    for (const source of this.citySources) {
+      if (this.shuttingDown) return;
+      this.recoveryRequired.add(sourceKey(source));
+      await this.requestRecovery(source);
+    }
+    if (Date.now() - this.lastHeartbeatAt >= TELEGRAM_RUNTIME_HEARTBEAT_MS) {
+      this.lastHeartbeatAt = Date.now();
+      this.logger.log(
+        `Telegram supervisor heartbeat ${JSON.stringify({
+          ...this.getHealth(),
+          ...this.getSnapshot().supervision,
+          counters: this.counters,
+        })}`,
+      );
+    }
+  }
+
+  private deferRetry(): void {
+    this.retryAttempt += 1;
+    this.retryAt =
+      Date.now() +
+      Math.min(
+        TELEGRAM_RUNTIME_RETRY_MAX_MS,
+        TELEGRAM_RUNTIME_SYNC_INTERVAL_MS *
+          2 ** Math.min(this.retryAttempt - 1, 4),
+      );
+  }
+
+  private requestProcessRestart(
+    code: 'WORKER_TIMEOUT' | 'SINGLETON_LOCK_LOST',
+  ): void {
+    if (this.restartRequested || this.shuttingDown) return;
+    this.restartRequested = true;
+    this.status = 'ERROR';
+    // No parallel replacement worker: exit releases sockets, transactions and
+    // advisory locks. Docker's existing unless-stopped policy starts one process.
+    this.logger.error(
+      `Telegram supervisor requesting container restart code=${code}`,
+    );
+    process.exit(1);
   }
 }
 
@@ -721,8 +968,8 @@ const waitForInflight = async (
   }
 };
 
-const safeExternalId = (externalId: string): string =>
-  /^[A-Za-z0-9:_-]{1,180}$/u.test(externalId) ? externalId : 'redacted';
+const isoOrNull = (timestamp: number | null): string | null =>
+  timestamp === null ? null : new Date(timestamp).toISOString();
 
 const safeErrorCode = (error: unknown): string => {
   if (error instanceof TelegramIntegrationError) {

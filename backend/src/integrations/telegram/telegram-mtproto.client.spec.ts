@@ -25,6 +25,7 @@ describe('TelegramMtprotoClient', () => {
     addEventHandler: jest.Mock;
     removeEventHandler: jest.Mock;
     disconnect: jest.Mock;
+    destroy: jest.Mock;
     connected: boolean;
     onError?: (error: Error) => Promise<void>;
   };
@@ -63,6 +64,9 @@ describe('TelegramMtprotoClient', () => {
       ),
       removeEventHandler: jest.fn(),
       disconnect: jest.fn().mockResolvedValue(undefined),
+      destroy: jest.fn().mockImplementation(async () => {
+        await gramClient.disconnect();
+      }),
       connected: true,
     };
     factory = {
@@ -144,7 +148,7 @@ describe('TelegramMtprotoClient', () => {
     expect((requestedPeer as Api.PeerChannel).channelId.toString()).toBe(
       '1989574928',
     );
-    expect(gramClient.getDialogs).toHaveBeenCalledWith({ limit: undefined });
+    expect(gramClient.getDialogs).toHaveBeenCalledWith({ limit: 100 });
     expect(source).toMatchObject({
       entity: sourceEntity,
       chatId: sourceChatId,
@@ -374,6 +378,61 @@ describe('TelegramMtprotoClient', () => {
     expect(gramClient.getMessages).toHaveBeenCalledWith(expect.anything(), {
       limit: 50,
     });
+  });
+
+  it('bounds a hung recovery RPC and ignores its late result without exposing upstream details', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(utils, 'getPeerId').mockReturnValue('-100123');
+    let release!: (messages: unknown[]) => void;
+    gramClient.getMessages.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    try {
+      const result = client
+        .getMessagesAfter('100', 200)
+        .catch((error: unknown) => error);
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(await result).toMatchObject({ code: 'CONNECTION_ERROR' });
+      expect(client.getConnectionSnapshot().lastConnectionErrorCategory).toBe(
+        'TIMEOUT',
+      );
+      release([{ id: 101, peerId: {} }]);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(gramClient.addEventHandler).not.toHaveBeenCalled();
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(session);
+    } finally {
+      await client.disconnect();
+      jest.useRealTimers();
+    }
+  });
+
+  it('times out an unresponsive connect and destroys the old GramJS client', async () => {
+    jest.useFakeTimers();
+    gramClient.connect.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    try {
+      const result = client.connect().catch((error: unknown) => error);
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(await result).toMatchObject({ code: 'CONNECTION_ERROR' });
+      expect(gramClient.destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      await client.disconnect();
+      jest.useRealTimers();
+    }
+  });
+
+  it('destroys the discarded client so its update loop cannot reconnect behind the new one', async () => {
+    jest.spyOn(utils, 'getPeerId').mockReturnValue('-100123');
+    await client.connect();
+    await client.disconnect();
+    expect(gramClient.destroy).toHaveBeenCalledTimes(1);
+    await client.connect();
+    expect(factory.create).toHaveBeenCalledTimes(2);
+    await client.disconnect();
   });
 
   it('fetches a historical page using the supplied Telegram offset', async () => {

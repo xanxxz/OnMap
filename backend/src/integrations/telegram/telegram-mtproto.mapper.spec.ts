@@ -132,4 +132,15 @@ describe('normalizeTelegramMtprotoMessage', () => {
 
     expect(result).toBeNull();
   });
+
+  it('can retain the position of a textless message for cursor recovery only', () => {
+    expect(
+      normalizeTelegramMtprotoMessage(
+        envelope({ rawMessage: { id: 10, date: 1_700_000_000 } }),
+        CHAT_ID,
+        CITY_ID,
+        true,
+      ),
+    ).toMatchObject({ externalId: 'telegram:-100123:10', text: '' });
+  });
 });

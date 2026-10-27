@@ -49,6 +49,16 @@ export class TelegramIngestionPersistenceService {
       return { status: 'NOOP', reason: 'UNSUPPORTED_DECISION' };
     }
 
+    if (
+      (event.contextUsed || event.replyContextUsed) &&
+      (!event.contextUsed ||
+        !event.replyContextUsed ||
+        !event.replyToExternalId ||
+        event.replyToExternalId === event.externalId)
+    ) {
+      return { status: 'NOOP', reason: 'INVALID_CONTEXT' };
+    }
+
     const type = TELEGRAM_TO_ROAD_EVENT_TYPE[event.eventType];
 
     if (type === undefined) {
@@ -611,6 +621,10 @@ export class TelegramIngestionPersistenceService {
     candidate: TelegramPersistenceCandidate,
     windowMs: number,
   ): Promise<readonly TelegramPersistenceTarget[]> {
+    if (event.replyContextUsed) {
+      return this.findReplyTarget(transaction, event, candidate, 'ACTIVE');
+    }
+
     if (event.canonicalLocationId !== null) {
       const canonicalMatches = await this.findTargetsByCanonicalLocation(
         transaction,
@@ -638,6 +652,10 @@ export class TelegramIngestionPersistenceService {
     event: NormalizedTelegramEvent,
     candidate: TelegramPersistenceCandidate,
   ): Promise<readonly TelegramPersistenceTarget[]> {
+    if (event.replyContextUsed) {
+      return this.findReplyTarget(transaction, event, candidate, 'RESOLVED');
+    }
+
     if (event.canonicalLocationId !== null) {
       const canonicalMatches = await this.findTargetsByCanonicalLocation(
         transaction,
@@ -658,6 +676,46 @@ export class TelegramIngestionPersistenceService {
       TELEGRAM_PERSISTENCE_TARGET_MATCH_WINDOW_MS,
       'RESOLVED',
     );
+  }
+
+  private async findReplyTarget(
+    transaction: TransactionClient,
+    event: NormalizedTelegramEvent,
+    candidate: TelegramPersistenceCandidate,
+    status: 'ACTIVE' | 'RESOLVED',
+  ): Promise<readonly TelegramPersistenceTarget[]> {
+    // A reply may only affect the event mapped to that exact source message.
+    // Never fall back to a nearby/newer event if the original target is gone.
+    return transaction.$queryRaw<TelegramPersistenceTarget[]>`
+      SELECT
+        road_event.id::text AS "id",
+        road_event.status::text AS "status",
+        road_event.location_precision::text AS "locationPrecision",
+        road_event.created_at AS "createdAt"
+      FROM road_events road_event
+      INNER JOIN telegram_road_event_messages reply_mapping
+        ON reply_mapping.road_event_id = road_event.id
+      WHERE
+        reply_mapping.source = 'TELEGRAM'::"RoadEventSource"
+        AND reply_mapping.source_chat_id = ${event.sourceChatId}
+        AND reply_mapping.external_message_id = ${event.replyToExternalId}
+        AND road_event.source = 'TELEGRAM'::"RoadEventSource"
+        AND road_event.city_id = ${candidate.cityId}
+        AND road_event.type = ${candidate.type}::"RoadEventType"
+        AND (
+          road_event.status = ${status}::"RoadEventStatus"
+          OR (
+            ${status}::text = 'ACTIVE'
+            AND ${candidate.type}::"RoadEventType" = 'ROAD_PATROL'::"RoadEventType"
+            AND road_event.status = 'STALE'::"RoadEventStatus"
+          )
+        )
+        AND road_event.created_at BETWEEN
+          ${new Date(candidate.timestamp.getTime() - TELEGRAM_PERSISTENCE_TARGET_MATCH_WINDOW_MS)}
+          AND ${candidate.timestamp}
+      LIMIT 2
+      FOR UPDATE OF road_event
+    `;
   }
 
   private async findTargetsByCanonicalLocation(

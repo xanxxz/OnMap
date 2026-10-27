@@ -24,4 +24,11 @@ export interface TelegramIngestionRuntimeSnapshot {
   readonly connection: TelegramMtprotoConnectionSnapshot;
   readonly counters: TelegramIngestionRuntimeCounters;
   readonly inFlight: number;
+  readonly supervision: {
+    readonly lastSuccessfulSyncAt: string | null;
+    readonly lastProcessedAt: string | null;
+    readonly pendingRecoverySources: number;
+    readonly consecutiveTransportFailures: number;
+    readonly sourceRestarts: number;
+  };
 }

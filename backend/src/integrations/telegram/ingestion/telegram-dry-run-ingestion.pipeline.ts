@@ -52,7 +52,12 @@ export class TelegramDryRunIngestionPipeline {
       previousMessages: input.previousMessages ?? [],
     });
     const replyContextUsed =
-      input.replyMessage !== undefined && parserResult.contextUsed;
+      parserResult.contextUsed &&
+      parserResult.contextSource === 'REPLY' &&
+      parserResult.contextMessageId === input.message.replyToExternalId &&
+      input.replyMessage?.externalId === input.message.replyToExternalId &&
+      input.replyMessage?.chatId === input.message.chatId &&
+      input.replyMessage?.cityId === input.message.cityId;
 
     if (!parserResult.matched || parserResult.intent === 'NOISE') {
       return {
@@ -220,6 +225,9 @@ export class TelegramDryRunIngestionPipeline {
       parserConfidence: parserResult.confidence,
       contextUsed: parserResult.contextUsed,
       replyContextUsed,
+      ...(replyContextUsed && parserResult.contextMessageId
+        ? { replyToExternalId: parserResult.contextMessageId }
+        : {}),
       resolverStatus: resolution.status,
       ...decision,
     };

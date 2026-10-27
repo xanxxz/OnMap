@@ -17,11 +17,17 @@ const message = (
   minutesBefore = 0,
   chatId = CHAT_ID,
 ): TelegramParserMessage => ({
+  externalId: `${chatId}:${minutesBefore}:${text}`,
   text,
   publishedAt: new Date(BASE_TIME - minutesBefore * 60_000).toISOString(),
   chatId,
   cityId: 'balakovo',
   authorName: 'Test author',
+});
+
+const replyInput = (text: string, original: TelegramParserMessage) => ({
+  message: { ...message(text), replyToExternalId: original.externalId },
+  replyMessage: original,
 });
 
 interface ParserCase {
@@ -31,6 +37,21 @@ interface ParserCase {
 }
 
 const CASES: readonly ParserCase[] = [
+  {
+    name: 'short active patrol report at numeric landmark',
+    text: '38 актив',
+    expected: {
+      eventType: 'DPS',
+      intent: 'REPORT',
+      state: 'ACTIVE',
+      locationAlias: 'school-38-stop',
+    },
+  },
+  {
+    name: 'textless recovery position is noise',
+    text: '',
+    expected: { matched: false, intent: 'NOISE' },
+  },
   {
     name: 'accident with known street',
     text: 'авария на комарова',
@@ -492,6 +513,136 @@ const CASES: readonly ParserCase[] = [
 describe('TelegramMessageParser', () => {
   const parser = new TelegramMessageParser();
 
+  it.each(['уехали', 'чисто', 'еще стоят', 'актив'])(
+    'never borrows the last chat message for an unlinked short message: %s',
+    (text) => {
+      expect(
+        parser.parse({
+          message: message(text),
+          previousMessages: [message('дпс на новом мосту', 1)],
+        }),
+      ).toMatchObject({ contextUsed: false, contextMessageId: null });
+    },
+  );
+
+  it.each([true, false])(
+    'does not search past an unknown message (quality guards: %s)',
+    (guards) => {
+      const result = new TelegramMessageParser(undefined, guards).parse({
+        message: message('уехали'),
+        previousMessages: [
+          message('дпс на новом мосту', 2),
+          message('неизвестный ориентир Б в кустах', 1),
+        ],
+      });
+      expect(result).toMatchObject({ matched: false, contextUsed: false });
+    },
+  );
+
+  it.each(['неизвестный ориентир Б уехали', 'на комарова чисто'])(
+    'does not attach another location to the replied-to event: %s',
+    (text) => {
+      const input = replyInput(text, message('дпс на новом мосту', 2));
+      expect(parser.parse(input)).toMatchObject({
+        contextUsed: false,
+        contextMessageId: null,
+      });
+      expect(
+        parser.parse({
+          message: input.message,
+          previousMessages: [input.replyMessage],
+        }),
+      ).toMatchObject({ contextUsed: false, contextMessageId: null });
+    },
+  );
+
+  it('does not borrow coordinates from a reply about a different specific event type', () => {
+    expect(
+      parser.parse(
+        replyInput('авария разъехались', message('дпс на новом мосту', 1)),
+      ),
+    ).toMatchObject({ contextUsed: false });
+  });
+
+  it('does not skip an unrecognized reply target to reach an older event', () => {
+    expect(
+      parser.parse({
+        ...replyInput('уехали', message('неизвестный ориентир Б в кустах', 1)),
+        previousMessages: [message('дпс на новом мосту', 2)],
+      }),
+    ).toMatchObject({ matched: false, contextUsed: false });
+  });
+
+  it('keeps an explicit reply valid across unrelated chat messages', () => {
+    const original = message('дпс на новом мосту', 2);
+    expect(
+      parser.parse({
+        ...replyInput('уехали', original),
+        previousMessages: [message('спасибо', 1)],
+      }),
+    ).toMatchObject({
+      intent: 'RESOLUTION',
+      eventType: 'DPS',
+      contextSource: 'REPLY',
+      contextMessageId: original.externalId,
+      locationAlias: 'bridge-pobedy',
+    });
+  });
+
+  it.each([
+    'missing-link',
+    'mismatched-link',
+    'other-chat',
+    'other-city',
+    'missing-id',
+    'self',
+    'future',
+    'expired',
+  ])('rejects an invalid reply link: %s', (kind) => {
+    let original = message('дпс на новом мосту', 1);
+    let current = {
+      ...message('уехали'),
+      replyToExternalId: original.externalId,
+    };
+    if (kind === 'missing-link')
+      current = { ...current, replyToExternalId: undefined };
+    if (kind === 'mismatched-link')
+      current = { ...current, replyToExternalId: 'another-id' };
+    if (kind === 'other-chat')
+      original = { ...original, chatId: 'another-chat' };
+    if (kind === 'other-city')
+      original = { ...original, cityId: 'another-city' };
+    if (kind === 'missing-id')
+      original = { ...original, externalId: undefined };
+    if (kind === 'self')
+      original = { ...original, externalId: current.externalId };
+    if (kind === 'future')
+      original = {
+        ...original,
+        publishedAt: new Date(BASE_TIME + 1).toISOString(),
+      };
+    if (kind === 'expired')
+      original = {
+        ...original,
+        publishedAt: new Date(BASE_TIME - 121 * 60_000).toISOString(),
+      };
+    expect(
+      parser.parse({
+        message: current,
+        replyMessage: original,
+        previousMessages: [message('дпс на транспортной', 1)],
+      }),
+    ).toMatchObject({ matched: false, contextUsed: false });
+  });
+
+  it('does not inherit a location from a multi-location reply', () => {
+    expect(
+      parser.parse(
+        replyInput('уехали', message('дпс на комарова, на новом мосту', 1)),
+      ),
+    ).toMatchObject({ matched: false, contextUsed: false });
+  });
+
   it.each(CASES)('$name', ({ text, expected }) => {
     const result = parser.parse({ message: message(text) });
 
@@ -500,10 +651,18 @@ describe('TelegramMessageParser', () => {
     expect(result.confidence).toBeLessThanOrEqual(1);
   });
 
+  it('does not infer an event from a textless recovery message and previous road context', () => {
+    expect(
+      parser.parse({
+        message: message(''),
+        previousMessages: [message('38 актив', 1)],
+      }),
+    ).toMatchObject({ matched: false, intent: 'NOISE' });
+  });
+
   it('inherits accident type and location for a resolution', () => {
     const result = parser.parse({
-      message: message('разъехались'),
-      previousMessages: [message('авария на комарова', 2)],
+      ...replyInput('разъехались', message('авария на комарова', 2)),
     });
 
     expect(result).toMatchObject({
@@ -517,8 +676,7 @@ describe('TelegramMessageParser', () => {
 
   it('inherits closure through an explicit reply', () => {
     const result = parser.parse({
-      message: message('открыли'),
-      replyMessage: message('проезда нет на новом мосту', 10),
+      ...replyInput('открыли', message('проезда нет на новом мосту', 10)),
       previousMessages: [message('пробка на транспортной', 1)],
     });
 
@@ -532,8 +690,7 @@ describe('TelegramMessageParser', () => {
 
   it('uses a location question as context for a clean road-state answer', () => {
     const result = parser.parse({
-      message: message('чисто'),
-      previousMessages: [message('как транспортная?', 1)],
+      ...replyInput('чисто', message('как транспортная?', 1)),
     });
 
     expect(result).toMatchObject({
@@ -547,8 +704,7 @@ describe('TelegramMessageParser', () => {
 
   it('inherits a cleaned reverse-question location through reply context', () => {
     const result = parser.parse({
-      message: message('чисто'),
-      replyMessage: message('мост победы как', 1),
+      ...replyInput('чисто', message('мост победы как', 1)),
     });
 
     expect(result).toMatchObject({
@@ -604,8 +760,7 @@ describe('TelegramMessageParser', () => {
 
   it('resolves a traffic jam from a short clean follow-up', () => {
     const result = parser.parse({
-      message: message('чисто'),
-      previousMessages: [message('пробка на мосту', 1)],
+      ...replyInput('чисто', message('пробка на мосту', 1)),
     });
 
     expect(result).toMatchObject({
@@ -619,8 +774,7 @@ describe('TelegramMessageParser', () => {
 
   it('inherits DPS location and state like any other event type', () => {
     const result = parser.parse({
-      message: message('уехали'),
-      previousMessages: [message('дпс на новом мосту', 1)],
+      ...replyInput('уехали', message('дпс на новом мосту', 1)),
     });
 
     expect(result).toMatchObject({
@@ -635,8 +789,7 @@ describe('TelegramMessageParser', () => {
 
   it('inherits an active DPS update from context', () => {
     const result = parser.parse({
-      message: message('еще стоят'),
-      previousMessages: [message('гайцы на аэс', 2)],
+      ...replyInput('еще стоят', message('гайцы на аэс', 2)),
     });
 
     expect(result).toMatchObject({
@@ -659,8 +812,7 @@ describe('TelegramMessageParser', () => {
 
   it('allows an explicit reply to outlive the shorter previous-message window', () => {
     const result = parser.parse({
-      message: message('чисто'),
-      replyMessage: message('как новый мост?', 30),
+      ...replyInput('чисто', message('как новый мост?', 30)),
       previousMessages: [message('дпс на транспортной', 1)],
     });
 
@@ -685,8 +837,7 @@ describe('TelegramMessageParser', () => {
 
   it('uses reply context before newer unrelated nearby messages', () => {
     const result = parser.parse({
-      message: message('разъехались'),
-      replyMessage: message('авария на комарова', 10),
+      ...replyInput('разъехались', message('авария на комарова', 10)),
       previousMessages: [message('пробка на новом мосту', 1)],
     });
 
@@ -715,8 +866,7 @@ describe('TelegramMessageParser', () => {
 
   it('turns a location-less report after a question into an update', () => {
     const result = parser.parse({
-      message: message('пробка'),
-      previousMessages: [message('как новый мост?', 1)],
+      ...replyInput('пробка', message('как новый мост?', 1)),
     });
 
     expect(result).toMatchObject({
@@ -738,6 +888,52 @@ describe('TelegramMessageParser', () => {
       intent: 'REPORT',
       locationAlias: 'mira',
       contextUsed: false,
+    });
+  });
+
+  it.each(['38 чисто?', 'как новый мост?', 'где дпс на мира?'])(
+    'keeps an explicit active report as REPORT after the question %s',
+    (question) => {
+      expect(
+        parser.parse({
+          message: message('38 актив'),
+          previousMessages: [message(question, 1)],
+        }),
+      ).toMatchObject({
+        matched: true,
+        eventType: 'DPS',
+        intent: 'REPORT',
+        state: 'ACTIVE',
+        locationAlias: 'school-38-stop',
+        contextUsed: false,
+      });
+    },
+  );
+
+  it('does not downgrade an explicit report just because it is a reply to a question', () => {
+    expect(
+      parser.parse({
+        ...replyInput('38 актив', message('38 чисто?', 1)),
+      }),
+    ).toMatchObject({
+      intent: 'REPORT',
+      locationAlias: 'school-38-stop',
+      contextUsed: false,
+    });
+  });
+
+  it('does not enrich a location-less answer without an explicit reply', () => {
+    expect(
+      parser.parse({
+        message: message('актив'),
+        previousMessages: [message('38 чисто?', 1)],
+      }),
+    ).toMatchObject({
+      intent: 'REPORT',
+      locationText: null,
+      contextUsed: false,
+      contextSource: 'NONE',
+      contextMessageId: null,
     });
   });
 
@@ -765,8 +961,7 @@ describe('TelegramMessageParser', () => {
     'На данный момент чисто',
   ])('inherits reply location after removing verbal time: %s', (text) => {
     const result = parser.parse({
-      message: message(text),
-      replyMessage: message('как гэс?', 10),
+      ...replyInput(text, message('как гэс?', 10)),
     });
 
     expect(result).toMatchObject({
@@ -966,7 +1161,11 @@ describe('TelegramMessageParser', () => {
 
   it('reports explicit reply provenance for a real short resolution', () => {
     const result = parser.parse({
-      message: { ...message('чисто'), externalId: 'current' },
+      message: {
+        ...message('чисто'),
+        externalId: 'current',
+        replyToExternalId: 'reply-1',
+      },
       replyMessage: {
         ...message('как транспортная?', 1),
         externalId: 'reply-1',
@@ -982,7 +1181,7 @@ describe('TelegramMessageParser', () => {
     });
   });
 
-  it('reports previous-message provenance for a real road question answer', () => {
+  it('does not use previous-message provenance for an unlinked answer', () => {
     const result = parser.parse({
       message: { ...message('чисто'), externalId: 'current' },
       previousMessages: [
@@ -994,11 +1193,10 @@ describe('TelegramMessageParser', () => {
     });
 
     expect(result).toMatchObject({
-      matched: true,
-      intent: 'RESOLUTION',
-      locationAlias: 'bridge-pobedy',
-      contextSource: 'PREVIOUS_MESSAGE',
-      contextMessageId: 'previous-1',
+      matched: false,
+      contextUsed: false,
+      contextSource: 'NONE',
+      contextMessageId: null,
     });
   });
 
@@ -1149,8 +1347,7 @@ describe('TelegramMessageParser', () => {
 
   it('keeps Transportnaya context inheritance after canonicalization', () => {
     const result = parser.parse({
-      message: message('Чисто'),
-      previousMessages: [message('Как транспортная?', 1)],
+      ...replyInput('Чисто', message('Как транспортная?', 1)),
     });
 
     expect(result).toMatchObject({

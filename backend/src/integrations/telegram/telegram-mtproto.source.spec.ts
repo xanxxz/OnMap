@@ -74,6 +74,15 @@ describe('TelegramMtprotoSource', () => {
     await expect(source.getRecentMessages()).resolves.toEqual([]);
   });
 
+  it('retains a latest textless position for a fresh runtime baseline without importing earlier history', async () => {
+    client.getRecentMessages.mockResolvedValue([
+      envelope(300, { rawMessage: { id: 300, date: 1_700_000_000 } }),
+    ]);
+    expect(await source.getRecentMessages(30, true)).toEqual([
+      expect.objectContaining({ externalId: 'telegram:-100123:300', text: '' }),
+    ]);
+  });
+
   it('allows an edited message as an update of the same externalId', async () => {
     client.getRecentMessages
       .mockResolvedValueOnce([envelope(1)])
@@ -232,6 +241,33 @@ describe('TelegramMtprotoSource', () => {
     ]);
     expect(second.messages).toHaveLength(3);
     expect(client.getMessagesAfter).toHaveBeenCalledWith('100', 200);
+  });
+
+  it('does not get stuck on a full recovery batch of textless posts before the next road report', async () => {
+    client.getMessagesAfter.mockResolvedValue({
+      envelopes: Array.from({ length: 200 }, (_, index) =>
+        envelope(index + 101, {
+          rawMessage: { id: index + 101, date: 1_700_000_000 + index },
+        }),
+      ),
+      truncated: true,
+    });
+    const configuredSource = { cityId: 'balakovo', sourceChatId: CHAT_ID };
+    const result = await source.getMessagesAfter(
+      configuredSource,
+      {
+        ...configuredSource,
+        lastMessageId: '100',
+        lastMessageTimestamp: null,
+      },
+      200,
+    );
+    expect(result.messages).toHaveLength(200);
+    expect(result.messages[199]).toMatchObject({
+      externalId: 'telegram:-100123:300',
+      text: '',
+    });
+    expect(result.truncated).toBe(true);
   });
 
   it('forwards reconnect only for the configured source', async () => {

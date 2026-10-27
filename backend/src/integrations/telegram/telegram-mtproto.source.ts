@@ -59,6 +59,7 @@ export class TelegramMtprotoSource
 
   async getRecentMessages(
     limit = TELEGRAM_BOOTSTRAP_HISTORY_LIMIT,
+    allowEmptyText = false,
   ): Promise<readonly TelegramMessage[]> {
     const [source, envelopes] = await Promise.all([
       this.getCitySources().then((sources) => sources[0]),
@@ -70,7 +71,7 @@ export class TelegramMtprotoSource
     }
 
     return envelopes
-      .map((envelope) => this.accept(envelope, source))
+      .map((envelope) => this.accept(envelope, source, allowEmptyText))
       .filter((message): message is TelegramMessage => message !== null);
   }
 
@@ -106,6 +107,9 @@ export class TelegramMtprotoSource
           envelope,
           configured.sourceChatId,
           configured.cityId,
+          // Recovery must advance through media/service posts too; an empty
+          // message is ignored by the parser rather than pinning a full batch.
+          true,
         ),
       )
       .filter((message): message is TelegramMessage => message !== null)
@@ -159,11 +163,13 @@ export class TelegramMtprotoSource
   private accept(
     envelope: TelegramMtprotoMessageEnvelope,
     source: { readonly cityId: string; readonly sourceChatId: string },
+    allowEmptyText = false,
   ): TelegramMessage | null {
     const message = normalizeTelegramMtprotoMessage(
       envelope,
       source.sourceChatId,
       source.cityId,
+      allowEmptyText,
     );
 
     if (message === null || !this.shouldProcess(message)) {

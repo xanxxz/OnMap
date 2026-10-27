@@ -17,6 +17,7 @@ export type TelegramParserState = 'ACTIVE' | 'RESOLVED' | 'UNKNOWN';
 
 export interface TelegramParserMessage {
   readonly externalId?: string;
+  readonly replyToExternalId?: string;
   readonly text: string;
   readonly publishedAt: string;
   readonly chatId: string;

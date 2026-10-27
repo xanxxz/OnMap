@@ -1,6 +1,7 @@
 import type { TelegramLocationResolutionResult } from '../location-resolver/telegram-location-resolver.types';
 import type { CityConfig } from '../../../cities/city.types';
 import { TelegramMessageParser } from '../parser/telegram-message.parser';
+import { TelegramLocationResolver } from '../location-resolver/telegram-location-resolver';
 import type { TelegramParserResult } from '../parser/telegram-parser.types';
 import type { TelegramMessage } from '../telegram.types';
 
@@ -139,6 +140,33 @@ const setupWithActualParser = (
 };
 
 describe('TelegramDryRunIngestionPipeline', () => {
+  it('creates an explicit numeric-landmark patrol report after a question using the existing verified point', async () => {
+    const pipeline = new TelegramDryRunIngestionPipeline(
+      new TelegramMessageParser(),
+      new TelegramLocationResolver({ isAvailable: () => false } as never),
+    );
+    const result = await pipeline.process({
+      message: message('38 актив'),
+      previousMessages: [
+        {
+          ...message('38 чисто?'),
+          externalId: 'previous-question',
+          publishedAt: '2026-08-31T07:59:00.000Z',
+        },
+      ],
+    });
+    expect(result.parserResult).toMatchObject({
+      intent: 'REPORT',
+      contextUsed: false,
+    });
+    expect(result.events[0]).toMatchObject({
+      decision: 'CREATE',
+      reason: 'READY_TO_CREATE',
+      canonicalLocationId: 'school-38-stop',
+      locationConfidence: 0.99,
+    });
+  });
+
   it('returns CREATE for a good report with a resolved location', async () => {
     const { pipeline } = setup(parserResult());
 
@@ -296,12 +324,24 @@ describe('TelegramDryRunIngestionPipeline', () => {
 
   it('returns an UPDATE candidate only with parser context', async () => {
     const { pipeline } = setup(
-      parserResult({ intent: 'UPDATE', contextUsed: true }),
+      parserResult({
+        intent: 'UPDATE',
+        contextUsed: true,
+        contextSource: 'REPLY',
+        contextMessageId: 'parent-message',
+      }),
     );
-    const reply = message('авария на комарова');
+    const reply = {
+      ...message('авария на комарова'),
+      externalId: 'parent-message',
+    };
 
     const result = await pipeline.process({
-      message: { ...message('еще стоит'), externalId: 'message-2' },
+      message: {
+        ...message('еще стоит'),
+        externalId: 'message-2',
+        replyToExternalId: reply.externalId,
+      },
       replyMessage: reply,
     });
 
@@ -594,7 +634,7 @@ describe('TelegramDryRunIngestionPipeline', () => {
     });
   });
 
-  it('accepts inherited Transportnaya clean state as a resolution', async () => {
+  it('accepts an explicit Transportnaya reply as a resolution', async () => {
     const { pipeline } = setupWithActualParser([
       resolved({
         canonicalTitle: 'Улица Транспортная',
@@ -610,8 +650,11 @@ describe('TelegramDryRunIngestionPipeline', () => {
     };
 
     const result = await pipeline.process({
-      message: message('Чисто'),
-      previousMessages: [previousMessage],
+      message: {
+        ...message('Чисто'),
+        replyToExternalId: previousMessage.externalId,
+      },
+      replyMessage: previousMessage,
     });
 
     expect(result.parserResult).toMatchObject({

@@ -13,7 +13,10 @@ import {
   TELEGRAM_MAX_HISTORY_LIMIT,
   TELEGRAM_RECOVERY_CURSOR_OVERLAP,
   TELEGRAM_RECOVERY_MAX_MESSAGES,
+  TELEGRAM_RPC_TIMEOUT_MS,
+  TELEGRAM_SOURCE_DIALOG_LIMIT,
 } from './telegram.constants';
+import { withTelegramDeadline } from './telegram-operation-timeout';
 import { TelegramIntegrationError } from './telegram.errors';
 import {
   TelegramMtprotoClientFactory,
@@ -158,14 +161,18 @@ export class TelegramMtprotoClient {
     );
 
     try {
-      const messages = await client.getMessages(source.entity, {
-        limit: safeLimit,
-      });
+      const messages = await withTelegramDeadline(
+        client.getMessages(source.entity, {
+          limit: safeLimit,
+        }),
+        TELEGRAM_RPC_TIMEOUT_MS,
+      );
 
       return messages.map((message) =>
         this.createEnvelope(message, source, hasEditDate(message)),
       );
-    } catch {
+    } catch (error: unknown) {
+      this.recordConnectionError(error, this.getConnectionErrorStage());
       this.logger.warn('Telegram MTProto history fetch failed');
 
       throw new TelegramIntegrationError(
@@ -188,10 +195,13 @@ export class TelegramMtprotoClient {
     const safeLimit = Math.max(1, Math.trunc(limit));
 
     try {
-      const messages = await client.getMessages(source.entity, {
-        limit: safeLimit,
-        ...(offsetId === undefined ? {} : { offsetId }),
-      });
+      const messages = await withTelegramDeadline(
+        client.getMessages(source.entity, {
+          limit: safeLimit,
+          ...(offsetId === undefined ? {} : { offsetId }),
+        }),
+        TELEGRAM_RPC_TIMEOUT_MS,
+      );
       const messageIds = messages
         .map((message) => message.id)
         .filter((id): id is number => Number.isSafeInteger(id) && id > 0);
@@ -234,11 +244,14 @@ export class TelegramMtprotoClient {
     );
 
     try {
-      const messages = await client.getMessages(source.entity, {
-        limit: safeLimit + 1,
-        minId,
-        reverse: true,
-      });
+      const messages = await withTelegramDeadline(
+        client.getMessages(source.entity, {
+          limit: safeLimit + 1,
+          minId,
+          reverse: true,
+        }),
+        TELEGRAM_RPC_TIMEOUT_MS,
+      );
       const truncated = messages.length > safeLimit;
       const bounded = truncated ? messages.slice(0, safeLimit) : messages;
 
@@ -248,7 +261,8 @@ export class TelegramMtprotoClient {
         ),
         truncated,
       };
-    } catch {
+    } catch (error: unknown) {
+      this.recordConnectionError(error, this.getConnectionErrorStage());
       this.logger.warn('Telegram MTProto recovery history fetch failed');
 
       throw new TelegramIntegrationError(
@@ -290,10 +304,13 @@ export class TelegramMtprotoClient {
     };
 
     try {
-      await Promise.all([
-        newMessageBuilder.resolve(client),
-        editedMessageBuilder.resolve(client),
-      ]);
+      await withTelegramDeadline(
+        Promise.all([
+          newMessageBuilder.resolve(client),
+          editedMessageBuilder.resolve(client),
+        ]),
+        TELEGRAM_RPC_TIMEOUT_MS,
+      );
       client.addEventHandler(newMessageHandler, newMessageBuilder);
       client.addEventHandler(editedMessageHandler, editedMessageBuilder);
     } catch {
@@ -365,7 +382,7 @@ export class TelegramMtprotoClient {
     }
 
     try {
-      await client.disconnect();
+      await client.destroy();
     } catch (error: unknown) {
       this.recordConnectionError(error, 'DISCONNECT');
     }
@@ -397,7 +414,7 @@ export class TelegramMtprotoClient {
     };
 
     try {
-      await client.connect();
+      await withTelegramDeadline(client.connect(), TELEGRAM_RPC_TIMEOUT_MS);
     } catch (error) {
       await this.clearFailedClient(client);
 
@@ -424,7 +441,10 @@ export class TelegramMtprotoClient {
     let authorized: boolean;
 
     try {
-      authorized = await client.checkAuthorization();
+      authorized = await withTelegramDeadline(
+        client.checkAuthorization(),
+        TELEGRAM_RPC_TIMEOUT_MS,
+      );
     } catch (error: unknown) {
       await this.clearFailedClient(client);
       this.recordConnectionError(error, 'CONNECT');
@@ -449,7 +469,10 @@ export class TelegramMtprotoClient {
     let entity: Entity;
 
     try {
-      entity = await resolveSourceEntity(client, config.sourceChatId);
+      entity = await withTelegramDeadline(
+        resolveSourceEntity(client, config.sourceChatId),
+        TELEGRAM_RPC_TIMEOUT_MS,
+      );
     } catch {
       await this.clearFailedClient(client);
       this.connectionState = 'ERROR';
@@ -665,7 +688,7 @@ export class TelegramMtprotoClient {
     }
 
     try {
-      await client.disconnect();
+      await client.destroy();
     } catch {
       // The original controlled error remains the useful result.
     }
@@ -731,7 +754,9 @@ const resolveSourceEntity = async (
     // have populated GramJS' entity cache.
   }
 
-  const dialogs = await client.getDialogs({ limit: undefined });
+  const dialogs = await client.getDialogs({
+    limit: TELEGRAM_SOURCE_DIALOG_LIMIT,
+  });
   const matchingDialog = dialogs.find(
     (dialog) => dialog.id?.toString() === canonicalChatId,
   );

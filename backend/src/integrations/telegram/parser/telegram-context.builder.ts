@@ -1,6 +1,5 @@
 import {
   TELEGRAM_PARSER_CONTEXT_WINDOW_MS,
-  TELEGRAM_PARSER_MAX_PREVIOUS_MESSAGES,
   TELEGRAM_PARSER_REPLY_CONTEXT_WINDOW_MS,
 } from './telegram-parser.constants';
 import { normalizeTelegramParserMessage } from './telegram-message.normalizer';
@@ -15,39 +14,22 @@ export const buildTelegramParserContext = (
   extendedReplyWindow = true,
 ): TelegramParserContext => {
   const currentTimestamp = Date.parse(input.message.publishedAt);
-  const replyMessage = isWithinContextWindow(
-    input.replyMessage,
-    input.message,
-    currentTimestamp,
-    extendedReplyWindow
-      ? TELEGRAM_PARSER_REPLY_CONTEXT_WINDOW_MS
-      : TELEGRAM_PARSER_CONTEXT_WINDOW_MS,
-  )
-    ? input.replyMessage
-    : undefined;
-  const previousMessages = (input.previousMessages ?? [])
-    .filter((candidate) =>
-      isWithinContextWindow(
-        candidate,
-        input.message,
-        currentTimestamp,
-        TELEGRAM_PARSER_CONTEXT_WINDOW_MS,
-      ),
+  const replyMessage =
+    input.message.replyToExternalId !== undefined &&
+    input.message.replyToExternalId === input.replyMessage?.externalId &&
+    input.message.externalId !== input.replyMessage?.externalId &&
+    isWithinContextWindow(
+      input.replyMessage,
+      input.message,
+      currentTimestamp,
+      extendedReplyWindow
+        ? TELEGRAM_PARSER_REPLY_CONTEXT_WINDOW_MS
+        : TELEGRAM_PARSER_CONTEXT_WINDOW_MS,
     )
-    .filter(
-      (candidate, index, all) =>
-        !isSameMessage(candidate, replyMessage) &&
-        all.findIndex((other) => isSameMessage(other, candidate)) === index,
-    )
-    .sort(
-      (left, right) =>
-        Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
-    )
-    .slice(
-      0,
-      TELEGRAM_PARSER_MAX_PREVIOUS_MESSAGES -
-        (replyMessage === undefined ? 0 : 1),
-    );
+      ? input.replyMessage
+      : undefined;
+  // Chat proximity is not a link to an event. Never search past an unknown
+  // message (or any other chat message) for a type/location to inherit.
   const nearby = [
     ...(replyMessage === undefined
       ? []
@@ -57,10 +39,6 @@ export const buildTelegramParserContext = (
             contextSource: 'REPLY' as const,
           },
         ]),
-    ...previousMessages.map((message) => ({
-      ...normalizeTelegramParserMessage(message),
-      contextSource: 'PREVIOUS_MESSAGE' as const,
-    })),
   ];
 
   return {
@@ -92,13 +70,3 @@ const isWithinContextWindow = (
     currentTimestamp - candidateTimestamp <= windowMs
   );
 };
-
-const isSameMessage = (
-  left: TelegramParserMessage,
-  right: TelegramParserMessage | undefined,
-): boolean =>
-  right !== undefined &&
-  left.chatId === right.chatId &&
-  left.cityId === right.cityId &&
-  left.publishedAt === right.publishedAt &&
-  left.text === right.text;

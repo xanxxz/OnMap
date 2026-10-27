@@ -6,6 +6,7 @@ coverage
 .env.*
 deploy/vps/.env
 deploy/vps/backend.env
+deploy/vps/telegram.env
 deploy/vps/backups
 runtime-data
 runtime-logs

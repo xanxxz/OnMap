@@ -41,7 +41,10 @@ export interface TelegramMessageSource {
   getConnectionSnapshot(): TelegramMtprotoConnectionSnapshot;
   getSourceChatId(): Promise<string>;
   getCitySources(): Promise<readonly TelegramCitySource[]>;
-  getRecentMessages(limit?: number): Promise<readonly TelegramMessage[]>;
+  getRecentMessages(
+    limit?: number,
+    allowEmptyText?: boolean,
+  ): Promise<readonly TelegramMessage[]>;
   getMessagesAfter(
     source: TelegramCitySource,
     cursor: TelegramSourceCursor,

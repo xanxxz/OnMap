@@ -11,7 +11,8 @@ export type TelegramPersistenceReason =
   | 'UNSUPPORTED_DECISION'
   | 'UNSUPPORTED_EVENT_TYPE'
   | 'INVALID_COORDINATES'
-  | 'INVALID_TIMESTAMP';
+  | 'INVALID_TIMESTAMP'
+  | 'INVALID_CONTEXT';
 
 export type TelegramPersistenceResult =
   | {

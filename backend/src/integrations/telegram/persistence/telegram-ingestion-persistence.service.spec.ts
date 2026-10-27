@@ -7,6 +7,11 @@ import { BALAKOVO_CITY_CONFIG } from '../../../cities/balakovo/balakovo.config';
 import * as cityRegistry from '../../../cities/city.registry';
 import type { NormalizedTelegramEvent } from '../ingestion/telegram-ingestion.types';
 import { TELEGRAM_EVENT_TTL_MS } from '../../../road-events/road-events.constants';
+import { TelegramMessageParser } from '../parser/telegram-message.parser';
+import { TelegramLocationResolver } from '../location-resolver/telegram-location-resolver';
+import { TelegramDryRunIngestionPipeline } from '../ingestion/telegram-dry-run-ingestion.pipeline';
+import { TelegramRuntimeContextStore } from '../runtime/telegram-runtime-context.store';
+import type { TelegramMessage } from '../telegram.types';
 
 import { TelegramIngestionPersistenceService } from './telegram-ingestion-persistence.service';
 
@@ -18,6 +23,7 @@ interface FakeState {
   activeCanonical?: readonly {
     id: string;
     status: 'ACTIVE' | 'STALE';
+    canonicalLocationId?: string;
     locationPrecision?: NormalizedTelegramEvent['locationPrecision'];
     createdAt?: Date | string;
   }[];
@@ -30,6 +36,8 @@ interface FakeState {
   resolvedCanonical?: readonly { id: string; status: 'RESOLVED' }[];
   resolvedCoordinates?: readonly { id: string; status: 'RESOLVED' }[];
   failMapping?: boolean;
+  replyActive?: readonly { id: string; status: 'ACTIVE' | 'STALE' }[];
+  replyResolved?: readonly { id: string; status: 'RESOLVED' }[];
 }
 
 const normalizedEvent = (
@@ -108,19 +116,39 @@ const setup = (initial: FakeState = {}) => {
 
       const resolved = values.includes('RESOLVED');
 
+      if (
+        sql.includes('INNER JOIN telegram_road_event_messages reply_mapping')
+      ) {
+        return Promise.resolve(
+          (resolved ? state.replyResolved : (state.replyActive ?? []))?.map(
+            (row) => ({
+              ...row,
+              createdAt: '2026-08-31T07:59:00.000Z',
+            }),
+          ) ?? [],
+        );
+      }
+
       if (sql.includes('EXISTS (')) {
         const rows = resolved
           ? (state.resolvedCanonical ?? [])
           : (state.activeCanonical ?? []);
 
         return Promise.resolve(
-          rows.map((row) => ({
-            ...row,
-            createdAt:
-              'createdAt' in row && row.createdAt
-                ? row.createdAt
-                : '2026-08-31T08:00:00.000Z',
-          })),
+          rows
+            .filter(
+              (row) =>
+                !('canonicalLocationId' in row) ||
+                row.canonicalLocationId === undefined ||
+                values.includes(row.canonicalLocationId),
+            )
+            .map((row) => ({
+              ...row,
+              createdAt:
+                'createdAt' in row && row.createdAt
+                  ? row.createdAt
+                  : '2026-08-31T08:00:00.000Z',
+            })),
         );
       }
 
@@ -195,6 +223,208 @@ const setup = (initial: FakeState = {}) => {
 };
 
 describe('TelegramIngestionPersistenceService', () => {
+  const originalMessage: TelegramMessage = {
+    externalId: 'synthetic:source:1',
+    source: 'TELEGRAM',
+    cityId: 'balakovo',
+    chatId: 'synthetic-source',
+    text: 'дпс на новом мосту',
+    publishedAt: '2026-08-31T07:58:00.000Z',
+    rawSourceType: 'message',
+  };
+  const pipeline = () =>
+    new TelegramDryRunIngestionPipeline(
+      new TelegramMessageParser(),
+      new TelegramLocationResolver({ isAvailable: () => false } as never),
+    );
+
+  it.each(['уехали', 'чисто', 'неизвестный ориентир Б уехали'])(
+    'does not resolve event A using an unlinked message: %s',
+    async (text) => {
+      const { service, executeRaw } = setup({
+        activeCanonical: [{ id: 'event-A', status: 'ACTIVE' }],
+      });
+      const context = new TelegramRuntimeContextStore();
+      context.remember(originalMessage);
+      context.remember({
+        ...originalMessage,
+        externalId: 'synthetic:source:2',
+        text: 'неизвестный ориентир Б в кустах',
+        publishedAt: '2026-08-31T07:59:00.000Z',
+      });
+      const result = await pipeline().process(
+        context.buildInput({
+          ...originalMessage,
+          externalId: 'synthetic:source:3',
+          text,
+          publishedAt: '2026-08-31T08:00:00.000Z',
+        }),
+      );
+      expect(result.parserResult.contextUsed).toBe(false);
+      expect(
+        result.events.every(
+          (event) =>
+            event.decision !== 'RESOLVE' && event.decision !== 'UPDATE',
+        ),
+      ).toBe(true);
+      for (const event of result.events) {
+        await expect(service.apply(event)).resolves.toMatchObject({
+          status: 'NOOP',
+        });
+      }
+      expect(executeRaw).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps event A active when a resolution explicitly identifies different location B', async () => {
+    const { service, executeRaw, queryRaw } = setup({
+      activeCanonical: [
+        {
+          id: 'event-A',
+          status: 'ACTIVE',
+          canonicalLocationId: 'bridge-pobedy',
+        },
+      ],
+    });
+    const context = new TelegramRuntimeContextStore();
+    context.remember(originalMessage);
+    const result = await pipeline().process(
+      context.buildInput({
+        ...originalMessage,
+        externalId: 'synthetic:source:2',
+        text: 'ГЭС чисто',
+        publishedAt: '2026-08-31T08:00:00.000Z',
+      }),
+    );
+    expect(result.parserResult).toMatchObject({
+      contextUsed: false,
+      locationAlias: 'ges',
+    });
+    expect(result.events[0].canonicalLocationId).toBe('ges');
+    await expect(service.apply(result.events[0])).resolves.toMatchObject({
+      status: 'NOOP',
+    });
+    expect(executeRaw).not.toHaveBeenCalled();
+    const lookup = queryRaw.mock.calls.find(([sql]) =>
+      sqlText(sql).includes('EXISTS ('),
+    );
+    expect(lookup?.slice(1)).toContain('ges');
+    expect(lookup?.slice(1)).not.toContain('bridge-pobedy');
+  });
+
+  it('resolves only the original mapped event for a verified explicit reply', async () => {
+    const { service, queryRaw, executeRaw } = setup({
+      replyActive: [{ id: 'event-A', status: 'ACTIVE' }],
+      activeCanonical: [{ id: 'event-B', status: 'ACTIVE' }],
+      activeCoordinates: [{ id: 'event-B', status: 'ACTIVE' }],
+    });
+    const context = new TelegramRuntimeContextStore();
+    context.remember(originalMessage);
+    context.remember({
+      ...originalMessage,
+      externalId: 'synthetic:source:2',
+      text: 'неизвестный ориентир Б',
+      publishedAt: '2026-08-31T07:59:00.000Z',
+    });
+    const result = await pipeline().process(
+      context.buildInput({
+        ...originalMessage,
+        externalId: 'synthetic:source:3',
+        replyToExternalId: originalMessage.externalId,
+        text: 'уехали',
+        publishedAt: '2026-08-31T08:00:00.000Z',
+      }),
+    );
+    expect(result.events[0]).toMatchObject({
+      decision: 'RESOLVE',
+      replyContextUsed: true,
+      replyToExternalId: originalMessage.externalId,
+    });
+    await expect(service.apply(result.events[0])).resolves.toEqual({
+      status: 'RESOLVED',
+      roadEventId: 'event-A',
+    });
+    const lookup = queryRaw.mock.calls.find(([sql]) =>
+      sqlText(sql).includes('reply_mapping'),
+    );
+    expect(lookup?.slice(1)).toEqual(
+      expect.arrayContaining([
+        originalMessage.chatId,
+        originalMessage.externalId,
+      ]),
+    );
+    const mutation = executeRaw.mock.calls.find(([sql]) =>
+      sqlText(sql).includes("status = 'RESOLVED'"),
+    );
+    expect(mutation?.slice(1)).toContain('event-A');
+    expect(mutation?.slice(1)).not.toContain('event-B');
+    expect(
+      queryRaw.mock.calls.some(([sql]) =>
+        sqlText(sql).includes('WITH candidate_location'),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([false, true])(
+    'never falls back to a replacement event when the reply target is unavailable (resolved: %s)',
+    async (alreadyResolved) => {
+      const { service, queryRaw, executeRaw } = setup({
+        activeCanonical: [{ id: 'event-B', status: 'ACTIVE' }],
+        activeCoordinates: [{ id: 'event-B', status: 'ACTIVE' }],
+        replyResolved: alreadyResolved
+          ? [{ id: 'event-A', status: 'RESOLVED' }]
+          : [],
+      });
+      await expect(
+        service.apply(
+          normalizedEvent({
+            decision: 'RESOLVE',
+            intent: 'RESOLUTION',
+            state: 'RESOLVED',
+            contextUsed: true,
+            replyContextUsed: true,
+            replyToExternalId: originalMessage.externalId,
+          }),
+        ),
+      ).resolves.toMatchObject({
+        status: 'NOOP',
+        reason: alreadyResolved ? 'ALREADY_RESOLVED' : 'TARGET_NOT_FOUND',
+      });
+      expect(
+        executeRaw.mock.calls.some(([sql]) =>
+          sqlText(sql).includes('UPDATE road_events'),
+        ),
+      ).toBe(false);
+      expect(
+        queryRaw.mock.calls.some(
+          ([sql]) =>
+            sqlText(sql).includes('WITH candidate_location') ||
+            sqlText(sql).includes('EXISTS ('),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    { contextUsed: true, replyContextUsed: false },
+    { contextUsed: true, replyContextUsed: true },
+    { contextUsed: false, replyContextUsed: true, replyToExternalId: 'parent' },
+    {
+      contextUsed: true,
+      replyContextUsed: true,
+      replyToExternalId: 'telegram:-1001:101',
+    },
+  ])(
+    'rejects unverified inherited events before any DB write: %j',
+    async (context) => {
+      const { service, transactionMock } = setup();
+      await expect(
+        service.apply(normalizedEvent({ ...context, decision: 'RESOLVE' })),
+      ).resolves.toEqual({ status: 'NOOP', reason: 'INVALID_CONTEXT' });
+      expect(transactionMock).not.toHaveBeenCalled();
+    },
+  );
+
   it('creates an ACTIVE Telegram RoadEvent for a CREATE decision', async () => {
     const { service, queryRaw } = setup();
 

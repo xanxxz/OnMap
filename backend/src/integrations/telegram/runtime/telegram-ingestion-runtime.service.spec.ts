@@ -28,6 +28,11 @@ import type {
 } from '../telegram.types';
 
 import { TelegramIngestionRuntimeService } from './telegram-ingestion-runtime.service';
+import { TelegramIntegrationError } from '../telegram.errors';
+import {
+  TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+  TELEGRAM_RUNTIME_WORKER_TIMEOUT_MS,
+} from './telegram-ingestion-runtime.constants';
 import { TelegramRuntimeReviewLogger } from './telegram-runtime-review.logger';
 import { TelegramRuntimeContextStore } from './telegram-runtime-context.store';
 import type { TelegramSourceCursorStore } from './telegram-source-cursor.store';
@@ -223,6 +228,12 @@ const setup = (options: SetupOptions = {}) => {
       },
     ),
   };
+  const singletonLock = {
+    tryAcquire: jest
+      .fn<Promise<boolean>, [string, () => void]>()
+      .mockResolvedValue(true),
+    release: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new TelegramIngestionRuntimeService(
     configService as unknown as ConfigService,
     source as unknown as TelegramMtprotoSource,
@@ -235,10 +246,7 @@ const setup = (options: SetupOptions = {}) => {
       recordUnlocated,
       clear: clearDpsObservation,
     } as unknown as DpsActivityTracker,
-    {
-      tryAcquire: jest.fn().mockResolvedValue(true),
-      release: jest.fn().mockResolvedValue(undefined),
-    } as never,
+    singletonLock as never,
   );
 
   return {
@@ -253,6 +261,7 @@ const setup = (options: SetupOptions = {}) => {
     clearDpsObservation,
     cursorStore,
     storedCursors,
+    singletonLock,
     emit: async (incoming: TelegramMessage) => {
       if (listener === undefined) {
         throw new Error('listener not registered');
@@ -365,6 +374,16 @@ describe('TelegramIngestionRuntimeService', () => {
       message(102),
     );
     expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe('102');
+  });
+
+  it('uses the last textless post as baseline rather than starting from zero and importing old reports', async () => {
+    const { service, source, storedCursors, process } = setup({
+      history: [message(300, { text: '' })],
+    });
+    await service.start();
+    expect(source.getRecentMessages).toHaveBeenCalledWith(30, true);
+    expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe('300');
+    expect(process).not.toHaveBeenCalled();
   });
 
   it('advances the durable cursor after a live terminal result', async () => {
@@ -780,16 +799,21 @@ describe('TelegramIngestionRuntimeService', () => {
 
   it('waits for in-flight processing before disconnecting', async () => {
     let release: ((result: TelegramDryRunIngestionResult) => void) | undefined;
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
     const process = jest.fn().mockImplementation(
       () =>
         new Promise<TelegramDryRunIngestionResult>((resolve) => {
           release = resolve;
+          signalStarted();
         }),
     );
     const { service, source } = setup({ process });
     await service.start();
     const processing = service.handleMessage(message(14));
-    await Promise.resolve();
+    await started;
 
     const shutdown = service.shutdown();
     await Promise.resolve();
@@ -971,5 +995,359 @@ describe('TelegramIngestionRuntimeService', () => {
     expect(service.getSnapshot().status).toBe('ERROR');
     expect(source.stop).toHaveBeenCalledTimes(1);
     expect(source.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  describe('independent ingestion supervision', () => {
+    const supervised: TelegramIngestionRuntimeService[] = [];
+    const monitored = (options: SetupOptions = {}) => {
+      const result = setup(options);
+      supervised.push(result.service);
+      return result;
+    };
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(async () => {
+      await Promise.all(
+        supervised.splice(0).map((service) => service.shutdown()),
+      );
+      jest.useRealTimers();
+    });
+
+    it('recovers silently missed live messages without any reconnect and does not duplicate them', async () => {
+      const getMessagesAfter = jest
+        .fn()
+        .mockResolvedValueOnce({ messages: [], truncated: false })
+        .mockResolvedValue({ messages: [message(101)], truncated: false });
+      const { service, source, process, storedCursors, singletonLock } =
+        monitored({
+          cursors: [durableCursor(100)],
+          getMessagesAfter,
+        });
+      await service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(
+        2 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(process).toHaveBeenCalledTimes(1);
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '101',
+      );
+      expect(source.start).toHaveBeenCalledTimes(1);
+      expect(singletonLock.tryAcquire).toHaveBeenCalledTimes(1);
+      expect(service.getHealth().status).toBe('ok');
+    });
+
+    it('keeps a quiet channel healthy by successful checks, without inventing cursor progress', async () => {
+      const { service, cursorStore, source } = monitored({
+        cursors: [durableCursor(100)],
+      });
+      await service.onApplicationBootstrap();
+      const initial = service.getHealth().lastSuccessfulSyncAt;
+      await jest.advanceTimersByTimeAsync(
+        10 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(service.getHealth()).toMatchObject({
+        status: 'ok',
+        lastProcessedAt: null,
+      });
+      expect(service.getHealth().lastSuccessfulSyncAt).not.toBe(initial);
+      expect(cursorStore.advance).not.toHaveBeenCalled();
+      expect(source.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries a failed startup on its own', async () => {
+      const { service, source } = monitored();
+      source.getCitySources.mockRejectedValueOnce(
+        new Error('temporary failure'),
+      );
+      await service.onApplicationBootstrap();
+      expect(service.getHealth().status).toBe('degraded');
+      await jest.advanceTimersByTimeAsync(TELEGRAM_RUNTIME_SYNC_INTERVAL_MS);
+      expect(service.getHealth().status).toBe('ok');
+      expect(source.start).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([false, true])(
+      'restores a silent live listener after reconciliation finds a recent missed update (edit=%s)',
+      async (edited) => {
+        jest.setSystemTime(new Date('2026-10-16T12:00:00.000Z'));
+        const missed = message(101, {
+          publishedAt: edited
+            ? '2026-10-15T12:00:01.000Z'
+            : '2026-10-16T12:00:01.000Z',
+          ...(edited
+            ? {
+                editedAt: '2026-10-16T12:00:01.000Z',
+                rawSourceType: 'edited_message' as const,
+              }
+            : {}),
+        });
+        const getMessagesAfter = jest
+          .fn()
+          .mockResolvedValueOnce({ messages: [], truncated: false })
+          .mockResolvedValue({ messages: [missed], truncated: false });
+        const { service, source, process, singletonLock } = monitored({
+          cursors: [durableCursor(100)],
+          getMessagesAfter,
+        });
+        await service.onApplicationBootstrap();
+        await jest.advanceTimersByTimeAsync(
+          3 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+        );
+        expect(process).toHaveBeenCalledTimes(1);
+        expect(source.start).toHaveBeenCalledTimes(2);
+        expect(source.disconnect).toHaveBeenCalledTimes(1);
+        expect(singletonLock.tryAcquire).toHaveBeenCalledTimes(1);
+        expect(service.getHealth().status).toBe('ok');
+      },
+    );
+
+    it('reports stale synchronization even when the transport still says connected', async () => {
+      const { service } = monitored();
+      await service.start();
+      expect(service.getHealth().status).toBe('ok');
+      await jest.advanceTimersByTimeAsync(TELEGRAM_RUNTIME_WORKER_TIMEOUT_MS);
+      expect(service.getSnapshot().connection.connectionState).toBe(
+        'RUNNING_CONNECTED',
+      );
+      expect(service.getHealth().status).toBe('degraded');
+    });
+
+    it('backs off repeated startup failures instead of retrying in a tight loop', async () => {
+      const { service, source } = monitored();
+      source.getCitySources
+        .mockRejectedValueOnce(new Error('temporary'))
+        .mockRejectedValueOnce(new Error('temporary'));
+      await service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(
+        2 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(source.getCitySources).toHaveBeenCalledTimes(2);
+      await jest.advanceTimersByTimeAsync(TELEGRAM_RUNTIME_SYNC_INTERVAL_MS);
+      expect(source.getCitySources).toHaveBeenCalledTimes(3);
+      expect(service.getHealth().status).toBe('ok');
+    });
+
+    it('replaces the source transport after three failed checks while retaining the singleton lock and cursor', async () => {
+      const failure = new TelegramIntegrationError(
+        'CONNECTION_ERROR',
+        'private upstream details',
+      );
+      const getMessagesAfter = jest
+        .fn()
+        .mockResolvedValueOnce({ messages: [], truncated: false })
+        .mockRejectedValueOnce(failure)
+        .mockRejectedValueOnce(failure)
+        .mockRejectedValueOnce(failure)
+        .mockResolvedValue({ messages: [message(101)], truncated: false });
+      const { service, source, singletonLock, storedCursors } = monitored({
+        cursors: [durableCursor(100)],
+        getMessagesAfter,
+      });
+      await service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(
+        4 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(source.stop).toHaveBeenCalledTimes(1);
+      expect(source.disconnect).toHaveBeenCalledTimes(1);
+      expect(source.start).toHaveBeenCalledTimes(2);
+      expect(singletonLock.tryAcquire).toHaveBeenCalledTimes(1);
+      expect(singletonLock.release).not.toHaveBeenCalled();
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '101',
+      );
+      expect(service.getSnapshot().supervision.sourceRestarts).toBe(1);
+      expect(service.getHealth().status).toBe('ok');
+    });
+
+    it('drains a truncated recovery on later ticks without needing a live message', async () => {
+      const getMessagesAfter = jest
+        .fn()
+        .mockResolvedValueOnce({ messages: [message(101)], truncated: true })
+        .mockResolvedValue({
+          messages: [message(101), message(102)],
+          truncated: false,
+        });
+      const { service, process, storedCursors } = monitored({
+        cursors: [durableCursor(100)],
+        getMessagesAfter,
+      });
+      await service.onApplicationBootstrap();
+      expect(service.getHealth().status).toBe('degraded');
+      await jest.advanceTimersByTimeAsync(TELEGRAM_RUNTIME_SYNC_INTERVAL_MS);
+      expect(process).toHaveBeenCalledTimes(2);
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '102',
+      );
+      expect(service.getHealth().status).toBe('ok');
+    });
+
+    it('retries a failed message before advancing to later messages', async () => {
+      const process = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('temporary processing error'))
+        .mockResolvedValue(pipelineResult([normalizedEvent()]));
+      const { service, storedCursors } = monitored({
+        cursors: [durableCursor(100)],
+        recoveryMessages: [message(101), message(102)],
+        process,
+      });
+      await service.onApplicationBootstrap();
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '100',
+      );
+      await jest.advanceTimersByTimeAsync(TELEGRAM_RUNTIME_SYNC_INTERVAL_MS);
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '102',
+      );
+      expect(process).toHaveBeenCalledTimes(3);
+    });
+
+    it('advances through textless recovery positions without creating events', async () => {
+      const { service, storedCursors, apply } = monitored({
+        cursors: [durableCursor(100)],
+        recoveryMessages: [message(101, { text: '' })],
+        process: jest.fn().mockResolvedValue(pipelineResult([], false)),
+      });
+      await service.onApplicationBootstrap();
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '101',
+      );
+      expect(apply).not.toHaveBeenCalled();
+    });
+
+    it('allows a long recovery while individual messages continue to make progress', async () => {
+      const exit = jest
+        .spyOn(process, 'exit')
+        .mockImplementation(() => undefined as never);
+      const processMessage = jest.fn(
+        () =>
+          new Promise<TelegramDryRunIngestionResult>((resolve) => {
+            setTimeout(() => resolve(pipelineResult([])), 60_000);
+          }),
+      );
+      const { service, storedCursors } = monitored({
+        cursors: [durableCursor(100)],
+        recoveryMessages: [101, 102, 103, 104].map((id) => message(id)),
+        process: processMessage,
+      });
+      const starting = service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(240_000);
+      await starting;
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '104',
+      );
+      expect(exit).not.toHaveBeenCalled();
+    });
+
+    it('fails closed on loss of the MTProto advisory lock', async () => {
+      const exit = jest
+        .spyOn(process, 'exit')
+        .mockImplementation(() => undefined as never);
+      const { service, singletonLock } = monitored();
+      await service.onApplicationBootstrap();
+      const onLostLock = singletonLock.tryAcquire.mock.calls[0][1];
+      onLostLock();
+      await jest.advanceTimersByTimeAsync(
+        2 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(exit).toHaveBeenCalledTimes(1);
+      expect(service.getHealth().status).toBe('degraded');
+    });
+
+    it('does not overlap reconciliation when Telegram is slow', async () => {
+      let release!: (batch: {
+        messages: TelegramMessage[];
+        truncated: boolean;
+      }) => void;
+      const getMessagesAfter = jest
+        .fn()
+        .mockResolvedValueOnce({ messages: [], truncated: false })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = resolve;
+            }),
+        );
+      const { service } = monitored({
+        cursors: [durableCursor(100)],
+        getMessagesAfter,
+      });
+      await service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(
+        4 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(getMessagesAfter).toHaveBeenCalledTimes(2);
+      expect(service.getHealth().status).toBe('ok');
+      release({ messages: [], truncated: false });
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    it('requests one process restart for a stuck worker instead of starting a parallel consumer', async () => {
+      const exit = jest
+        .spyOn(process, 'exit')
+        .mockImplementation(() => undefined as never);
+      let release!: (batch: {
+        messages: TelegramMessage[];
+        truncated: boolean;
+      }) => void;
+      const getMessagesAfter = jest
+        .fn()
+        .mockResolvedValueOnce({ messages: [], truncated: false })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = resolve;
+            }),
+        );
+      const { service, source, singletonLock } = monitored({
+        cursors: [durableCursor(100)],
+        getMessagesAfter,
+      });
+      await service.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(
+        TELEGRAM_RUNTIME_WORKER_TIMEOUT_MS +
+          2 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(exit).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(source.start).toHaveBeenCalledTimes(1);
+      expect(singletonLock.tryAcquire).toHaveBeenCalledTimes(1);
+      release({ messages: [], truncated: false });
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    it('fills an ID gap before allowing a later live message to advance the cursor', async () => {
+      const getMessagesAfter = jest
+        .fn()
+        .mockResolvedValueOnce({ messages: [], truncated: false })
+        .mockResolvedValue({
+          messages: [message(101), message(102), message(103)],
+          truncated: false,
+        });
+      const { service, emit, process, storedCursors } = monitored({
+        cursors: [durableCursor(100)],
+        getMessagesAfter,
+      });
+      await service.onApplicationBootstrap();
+      await emit(message(103));
+      expect(
+        process.mock.calls.map(
+          ([input]: [TelegramDryRunIngestionInput]) => input.message.externalId,
+        ),
+      ).toEqual([101, 102, 103].map((id) => `telegram:${CHAT_ID}:${id}`));
+      expect(storedCursors.get(`balakovo:${CHAT_ID}`)?.lastMessageId).toBe(
+        '103',
+      );
+    });
+
+    it('stops periodic checks on application shutdown', async () => {
+      const { service, source } = monitored({ cursors: [durableCursor(100)] });
+      await service.onApplicationBootstrap();
+      await service.shutdown();
+      await jest.advanceTimersByTimeAsync(
+        3 * TELEGRAM_RUNTIME_SYNC_INTERVAL_MS,
+      );
+      expect(source.getMessagesAfter).toHaveBeenCalledTimes(1);
+      expect(service.getHealth().status).toBe('degraded');
+    });
   });
 });

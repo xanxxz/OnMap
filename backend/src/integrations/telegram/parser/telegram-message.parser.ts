@@ -66,6 +66,7 @@ interface DirectAnalysis {
   readonly intent: TelegramParserIntent;
   readonly state: TelegramParserState;
   readonly location: LocationMatch;
+  readonly hasOwnLocation: boolean;
   readonly locations: readonly LocationMatch[];
   readonly direction: TelegramLocationDirection | null;
   readonly matchedTerms: readonly string[];
@@ -104,7 +105,19 @@ export class TelegramMessageParser {
           this.qualityGuardsEnabled,
         ),
       }))
-      .find(({ analysis }) => analysis.matched);
+      .find(
+        ({ analysis }) =>
+          analysis.matched &&
+          analysis.locations.length === 1 &&
+          (!current.hasOwnLocation ||
+            (current.locations.length === 1 &&
+              current.location.alias !== null &&
+              current.location.alias === analysis.location.alias)) &&
+          (current.eventType === 'OTHER' ||
+            current.eventType === 'ROAD_STATE' ||
+            analysis.eventType === 'ROAD_STATE' ||
+            current.eventType === analysis.eventType),
+      );
 
     if (!current.matched) {
       if (
@@ -184,10 +197,9 @@ export class TelegramMessageParser {
         contextUsed = true;
       }
 
-      if (
-        intent === 'REPORT' &&
-        (contextUsed || relevantContext.analysis.intent === 'QUESTION')
-      ) {
+      // A self-contained report keeps its own location/type. A previous
+      // question alone is not evidence that an existing event is being updated.
+      if (intent === 'REPORT' && contextUsed) {
         intent = 'UPDATE';
         state = 'ACTIVE';
         contextUsed = true;
@@ -295,6 +307,7 @@ const analyzeDirectMessage = (
         intent: 'QUESTION',
         state: 'UNKNOWN',
         location,
+        hasOwnLocation: locations.length > 0,
         locations,
         direction,
         matchedTerms: [],
@@ -317,6 +330,7 @@ const analyzeDirectMessage = (
       intent: 'NOISE',
       state: 'UNKNOWN',
       location: knownLocations[0] ?? { text: null, alias: null },
+      hasOwnLocation: locations.length > 0,
       locations: knownLocations,
       direction,
       matchedTerms: uniqueTerms([
@@ -337,6 +351,7 @@ const analyzeDirectMessage = (
       intent: 'NOISE',
       state: 'UNKNOWN',
       location: { text: null, alias: null },
+      hasOwnLocation: locations.length > 0,
       locations: [],
       direction: null,
       matchedTerms: selected.matchedTerms,
@@ -369,6 +384,7 @@ const analyzeDirectMessage = (
     intent,
     state,
     location,
+    hasOwnLocation: locations.length > 0,
     locations,
     direction,
     matchedTerms: uniqueTerms([
@@ -1025,6 +1041,7 @@ const directNoise = (reason: string): DirectAnalysis => ({
   intent: 'NOISE',
   state: 'UNKNOWN',
   location: { text: null, alias: null },
+  hasOwnLocation: false,
   locations: [],
   direction: null,
   matchedTerms: [],

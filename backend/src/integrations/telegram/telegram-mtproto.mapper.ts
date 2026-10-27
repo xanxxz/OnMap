@@ -8,13 +8,15 @@ export const normalizeTelegramMtprotoMessage = (
   envelope: TelegramMtprotoMessageEnvelope,
   expectedChatId: string,
   cityId: string,
+  allowEmptyText = false,
 ): TelegramMessage | null => {
   if (envelope.chatId !== expectedChatId || !isRecord(envelope.rawMessage)) {
     return null;
   }
 
   const messageId = asInteger(envelope.rawMessage.id);
-  const text = asText(envelope.rawMessage.message);
+  const text =
+    asText(envelope.rawMessage.message) ?? (allowEmptyText ? '' : undefined);
   const publishedAt = asTelegramDate(envelope.rawMessage.date);
 
   if (
