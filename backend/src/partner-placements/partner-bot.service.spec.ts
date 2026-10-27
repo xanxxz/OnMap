@@ -359,6 +359,11 @@ describe('partner bot owner access', () => {
 });
 
 describe('partner bot persisted workflow and idempotence', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-15T08:00:00.000Z'));
+  });
+  afterEach(() => jest.useRealTimers());
+
   it('attaches a normalized image while creating a new point only after confirmation', async () => {
     const harness = createHarness();
     const bot = harness.service();
