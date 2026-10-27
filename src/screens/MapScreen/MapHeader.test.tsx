@@ -61,6 +61,63 @@ describe('MapHeader', () => {
     expect(openURL).toHaveBeenCalledWith('https://t.me/onMapSupport');
   });
 
+  it('opens the three public documents below support in the scrollable city selector', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    act(() => {
+      renderer = create(
+        <MapHeader city={balakovoCity} cities={[balakovoCity]} dpsActivity={null}
+          eventCount={0} realtimeStatus="connected" onSelectCity={jest.fn()} />,
+      );
+    });
+    expect(renderer.root.findByType(require('react-native').Modal).props.visible).toBe(false);
+    act(() => renderer.root.findByProps({testID: 'city-header-button'}).props.onPress());
+    expect(renderer.root.findByType(require('react-native').Modal).props.visible).toBe(true);
+
+    const content = renderer.root.findByProps({testID: 'city-selector-content'});
+    const text = content.findAllByType(require('react-native').Text)
+      .map(node => node.props.children).join(' ');
+    expect(text.indexOf('Документы OnMap')).toBeGreaterThan(text.indexOf('@onMapSupport'));
+    expect(StyleSheet.flatten(content.props.style).maxHeight).toBeGreaterThan(0);
+
+    for (const [id, title, url] of [
+      ['privacy', 'Политика конфиденциальности', 'https://balakovo-go.ru/onmap/privacy/'],
+      ['terms', 'Условия использования', 'https://balakovo-go.ru/onmap/terms/'],
+      ['community-rules', 'Правила сообщества', 'https://balakovo-go.ru/onmap/community-rules/'],
+    ]) {
+      const link = content.findByProps({testID: `legal-link-${id}`});
+      expect(link.props.accessibilityRole).toBe('link');
+      expect(link.props.accessibilityLabel).toBe(title);
+      expect(StyleSheet.flatten(link.props.style({pressed: false})).minHeight).toBeGreaterThanOrEqual(48);
+      await act(async () => link.props.onPress());
+      expect(openURL).toHaveBeenLastCalledWith(url);
+    }
+    expect(renderer.root.findByType(require('react-native').Modal).props.visible).toBe(true);
+  });
+
+  it('shows a selectable document URL on failure and clears the error after retry', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL')
+      .mockClear()
+      .mockRejectedValueOnce(new Error('unavailable'))
+      .mockResolvedValue(undefined);
+    act(() => {
+      renderer = create(
+        <MapHeader city={balakovoCity} cities={[balakovoCity]} dpsActivity={null}
+          eventCount={0} realtimeStatus="connected" onSelectCity={jest.fn()} />,
+      );
+    });
+    act(() => {
+      renderer.root.findByProps({testID: 'city-header-button'}).props.onPress();
+    });
+    const link = renderer.root.findByProps({testID: 'legal-link-privacy'});
+    await act(async () => link.props.onPress());
+    const error = renderer.root.findByProps({accessibilityLiveRegion: 'polite'});
+    expect(error.props.selectable).toBe(true);
+    expect(error.props.children.join('')).toContain('https://balakovo-go.ru/onmap/privacy/');
+    await act(async () => link.props.onPress());
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findAllByProps({accessibilityLiveRegion: 'polite'})).toHaveLength(0);
+  });
+
   it('shows the city and selects another registry entry', () => {
     const onSelectCity = jest.fn();
 

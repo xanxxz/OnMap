@@ -234,4 +234,24 @@ export const headerStyles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
   },
+  legalSection: {
+    marginTop: spacing[12],
+    paddingTop: spacing[12],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  legalLink: {
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingVertical: spacing[10],
+  },
+  legalLinkText: {
+    ...typography.body,
+    color: colors.brandForest,
+    textDecorationLine: 'underline',
+    flexShrink: 1,
+  },
+  legalLinkPressed: {
+    opacity: 0.65,
+  },
 });

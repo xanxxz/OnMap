@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { AppState, Linking, Modal, Pressable, Text, View } from 'react-native';
+import { AppState, Linking, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 
 import type { DpsActivitySummary } from '../../entities/road-event/api/roadEventRepository';
 import type { PartnerBanner } from '../../entities/partner-placement/model/partnerPlacement';
@@ -9,6 +9,7 @@ import type { CityConfig } from '../../shared/config/cities';
 import type { RealtimeStatus } from '../../entities/road-event/model/useRoadEventRealtime';
 import { BottomSheet } from '../../shared/ui/BottomSheet/BottomSheet';
 import { SUPPORT_HANDLE, SUPPORT_URL } from '../../shared/config/support';
+import { LEGAL_DOCUMENTS } from '../../shared/config/legal';
 
 import { headerStyles } from './MapHeader.styles';
 
@@ -64,6 +65,9 @@ export const MapHeader = ({
   const [selectorVisible, setSelectorVisible] = useState(false);
   const [selectorMounted, setSelectorMounted] = useState(false);
   const [supportOpenFailed, setSupportOpenFailed] = useState(false);
+  const [legalOpenFailed, setLegalOpenFailed] = useState<string | null>(null);
+  const {height: windowHeight} = useWindowDimensions();
+  const selectorScrollStyle = useMemo(() => ({maxHeight: windowHeight * 0.72}), [windowHeight]);
   const [bannerOpenFailed, setBannerOpenFailed] = useState(false);
   const [bannerLaidOut, setBannerLaidOut] = useState(false);
   const [bannerExpanded, setBannerExpanded] = useState(false);
@@ -232,7 +236,12 @@ export const MapHeader = ({
           onClose={closeSelector}
           onClosed={selectorClosed}
         >
-          <View style={headerStyles.selectorContent}>
+          <ScrollView
+            style={selectorScrollStyle}
+            contentContainerStyle={headerStyles.selectorContent}
+            showsVerticalScrollIndicator
+            testID="city-selector-content"
+          >
             <Text style={headerStyles.selectorTitle}>Выберите город</Text>
             <Text style={headerStyles.selectorSubtitle}>
               Карта и события обновятся автоматически
@@ -295,7 +304,35 @@ export const MapHeader = ({
                 </Text>
               ) : null}
             </View>
-          </View>
+            <View style={headerStyles.legalSection}>
+              <Text style={headerStyles.supportTitle}>Документы OnMap</Text>
+              {LEGAL_DOCUMENTS.map(document => (
+                <Pressable
+                  key={document.id}
+                  testID={`legal-link-${document.id}`}
+                  accessibilityRole="link"
+                  accessibilityLabel={document.title}
+                  accessibilityHint="Откроется в браузере"
+                  onPress={async () => {
+                    setLegalOpenFailed(null);
+                    try {
+                      await Linking.openURL(document.url);
+                    } catch {
+                      setLegalOpenFailed(document.url);
+                    }
+                  }}
+                  style={({pressed}) => [headerStyles.legalLink, pressed && headerStyles.legalLinkPressed]}
+                >
+                  <Text style={headerStyles.legalLinkText}>{document.title}</Text>
+                </Pressable>
+              ))}
+              {legalOpenFailed ? (
+                <Text selectable style={headerStyles.supportHint} accessibilityLiveRegion="polite">
+                  Не удалось открыть документ. Проверьте подключение и нажмите ссылку ещё раз или скопируйте адрес в браузер: {legalOpenFailed}
+                </Text>
+              ) : null}
+            </View>
+          </ScrollView>
         </BottomSheet>
       </Modal>
     </>
