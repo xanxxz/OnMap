@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '../generated/prisma/client';
@@ -7,12 +7,11 @@ import { PrismaService } from '../database/prisma.service';
 import {
   advancePartnerDraft,
   BannerDraft,
-  ContactDraft,
   partnerDraftPrompt,
   PartnerDraftState,
   PointDraft,
 } from './partner-bot.flow';
-import { safePartnerAppearance } from './partner-placement-colors';
+import { PartnerManagementService } from './partner-management.service';
 import { normalizePartnerImage, PartnerImageError } from './partner-image';
 import { queuePartnerPush } from '../push/push-queue';
 import { PARTNER_PUSH_MIN_INTERVAL_MS } from '../push/push-policy';
@@ -331,6 +330,7 @@ const help = [
 @Injectable()
 export class PartnerBotService {
   private readonly ownerIds: ReadonlySet<string>;
+  private readonly management = new PartnerManagementService();
 
   constructor(
     config: ConfigService,
@@ -821,69 +821,34 @@ export class PartnerBotService {
       await this.saveDraft(tx, ownerId, draft);
       return this.draftReply(ownerId, draft);
     }
-    if (command === '/partner_banner_enable') {
+    if (
+      [
+        '/partner_banner_enable',
+        '/partner_banner_off',
+        '/partner_banner_end',
+      ].includes(command ?? '')
+    ) {
       const cityId = args[0];
       if (!cityId || !getCityConfig(cityId))
         return respond('Укажите поддерживаемый cityId.');
-      const now = new Date();
-      const banner = await tx.partnerCityBanner.findUnique({
-        where: { cityId },
-      });
-      const point = banner?.partnerPointId
-        ? await tx.partnerPoint.findUnique({
-            where: { id: banner.partnerPointId },
-          })
-        : null;
-      if (
-        !banner?.title ||
-        !banner.text ||
-        !banner.buttonLabel ||
-        !banner.buttonUrl ||
-        !banner.startsAt ||
-        !banner.endsAt ||
-        banner.startsAt > now ||
-        banner.endsAt <= now ||
-        !point ||
-        point.cityId !== cityId ||
-        point.status !== 'ACTIVE' ||
-        point.startsAt > now ||
-        point.endsAt <= now
-      )
-        return respond(
-          'Баннер или связанная точка сейчас недоступны. Проверьте срок и статус.',
-        );
-      const changed = await tx.partnerCityBanner.updateMany({
-        where: { cityId, enabled: false },
-        data: { enabled: true },
-      });
-      return respond(changed.count ? 'Баннер включён.' : 'Баннер уже включён.');
-    }
-    if (command === '/partner_banner_off') {
-      const cityId = args[0];
-      if (!cityId || !getCityConfig(cityId))
-        return respond('Укажите поддерживаемый cityId.');
-      const changed = await tx.partnerCityBanner.updateMany({
-        where: { cityId, enabled: true },
-        data: { enabled: false },
-      });
+      const action =
+        command === '/partner_banner_enable'
+          ? 'enable'
+          : command === '/partner_banner_end'
+            ? 'end'
+            : 'pause';
+      try {
+        await this.management.bannerStatus(tx, cityId, action);
+      } catch (error) {
+        if (error instanceof BadRequestException) return respond(error.message);
+        throw error;
+      }
       return respond(
-        changed.count
-          ? 'Баннер выключен.'
-          : 'Баннер уже выключен или не найден.',
-      );
-    }
-    if (command === '/partner_banner_end') {
-      const cityId = args[0];
-      if (!cityId || !getCityConfig(cityId))
-        return respond('Укажите поддерживаемый cityId.');
-      const changed = await tx.partnerCityBanner.updateMany({
-        where: { cityId, endsAt: { gt: new Date() } },
-        data: { enabled: false, endsAt: new Date() },
-      });
-      return respond(
-        changed.count
-          ? 'Баннер завершён и выключен. Срок партнёрской точки не изменён.'
-          : 'Баннер уже завершён или не найден.',
+        action === 'enable'
+          ? 'Баннер включён.'
+          : action === 'end'
+            ? 'Баннер завершён и выключен. Срок партнёрской точки не изменён.'
+            : 'Баннер выключен.',
       );
     }
     if (
@@ -893,32 +858,24 @@ export class PartnerBotService {
     ) {
       const id = args[0];
       if (!id || !UUID.test(id)) return respond('Укажите UUID точки.');
-      const now = new Date();
-      const where =
+      const action =
         command === '/partner_pause'
-          ? { id, status: 'ACTIVE' as const }
+          ? 'pause'
           : command === '/partner_resume'
-            ? { id, status: 'PAUSED' as const, endsAt: { gt: now } }
-            : {
-                id,
-                status: {
-                  in: ['ACTIVE', 'PAUSED'] as Array<'ACTIVE' | 'PAUSED'>,
-                },
-              };
-      const status =
-        command === '/partner_pause'
-          ? ('PAUSED' as const)
-          : command === '/partner_resume'
-            ? ('ACTIVE' as const)
-            : ('ENDED' as const);
-      const changed = await tx.partnerPoint.updateMany({
-        where,
-        data: { status },
-      });
+            ? 'resume'
+            : 'end';
+      try {
+        await this.management.pointStatus(tx, id, action);
+      } catch (error) {
+        if (error instanceof BadRequestException) return respond(error.message);
+        throw error;
+      }
       return respond(
-        changed.count
-          ? `Статус точки: ${status}.`
-          : 'Статус не изменён: точка не найдена или переход невозможен.',
+        action === 'pause'
+          ? 'Точка на паузе.'
+          : action === 'resume'
+            ? 'Точка активна.'
+            : 'Точка завершена.',
       );
     }
     if (command === '/partner_price' || command === '/partner_paid') {
@@ -1458,103 +1415,12 @@ export class PartnerBotService {
           callbackText:
             'Изображение недоступно. Начните редактирование заново.',
         };
-      const contacts = point.contacts.map((contact: ContactDraft) => ({
-        id: contact.id,
-        type: contact.type,
-        label: contact.label,
-        value: contact.value,
-        displayOrder: contact.displayOrder,
-      }));
-      const placementData = {
-        title: point.title,
-        category: point.category,
-        ...safePartnerAppearance(point.backgroundColor, point.textColor),
-        description: point.description ?? null,
-        latitude: point.latitude,
-        longitude: point.longitude,
-        displayAddress: point.displayAddress ?? null,
-        imageAssetKey: point.imageAssetKey ?? null,
-        promoCode: point.promoCode ?? null,
-        promoTerms: point.promoCode ? (point.promoTerms ?? null) : null,
-        startsAt: new Date(point.startsAt),
-        endsAt: new Date(point.endsAt),
-      };
-      if (point.editingId) {
-        const existing = await tx.partnerPoint.findUnique({
-          where: { id: point.editingId },
-        });
-        if (
-          !existing ||
-          existing.status === 'ENDED' ||
-          existing.cityId !== point.cityId ||
-          (existing.imageAssetKey ?? null) !==
-            (point.originalImageAssetKey ?? null)
-        )
-          return {
-            chatId: ownerId,
-            callbackText: 'Точка недоступна для изменения',
-          };
-        const storedContacts = await tx.partnerPointContact.findMany({
-          where: { partnerPointId: point.editingId },
-          select: { id: true, type: true, value: true },
-        });
-        const stable = new Map(
-          storedContacts.map((contact) => [contact.id, contact]),
-        );
-        const retained = contacts.filter((contact) => {
-          const old = contact.id ? stable.get(contact.id) : null;
-          return (
-            old && old.type === contact.type && old.value === contact.value
-          );
-        });
-        const retainedIds = retained.map((contact) => contact.id as string);
-        await tx.partnerPoint.update({ where: { id: point.editingId }, data: placementData });
-        await tx.partnerPointContact.deleteMany({
-          where: {
-            partnerPointId: point.editingId,
-            id: { notIn: retainedIds },
-          },
-        });
-        for (const contact of retained) {
-          await tx.partnerPointContact.update({
-            where: { id: contact.id },
-            data: { label: contact.label, displayOrder: contact.displayOrder },
-          });
-        }
-        const fresh = contacts.filter(
-          (contact) => !retainedIds.includes(contact.id ?? ''),
-        );
-        if (fresh.length)
-          await tx.partnerPointContact.createMany({
-            data: fresh.map((contact) => ({
-              partnerPointId: point.editingId as string,
-              type: contact.type,
-              label: contact.label,
-              value: contact.value,
-              displayOrder: contact.displayOrder,
-            })),
-          });
-        if (
-          existing.imageAssetKey &&
-          existing.imageAssetKey !== point.imageAssetKey &&
-          UUID.test(existing.imageAssetKey) &&
-          (await tx.partnerPoint.count({
-            where: { imageAssetKey: existing.imageAssetKey },
-          })) === 0
-        ) {
-          await tx.partnerImageAsset.deleteMany({
-            where: { key: existing.imageAssetKey },
-          });
-        }
-      } else {
-        await tx.partnerPoint.create({
-          data: {
-            cityId: point.cityId,
-            ...placementData,
-            status: 'ACTIVE',
-            contacts: { create: contacts },
-          },
-        });
+      try {
+        await this.management.savePoint(tx, point);
+      } catch (error) {
+        if (error instanceof BadRequestException)
+          return { chatId: ownerId, callbackText: error.message };
+        throw error;
       }
       await tx.partnerBotDraft.delete({ where: { ownerTelegramId: ownerId } });
       return {
@@ -1574,42 +1440,17 @@ export class PartnerBotService {
       !banner.endsAt
     )
       return { chatId: ownerId, callbackText: 'Черновик неполный' };
-    const linked = await tx.partnerPoint.findUnique({
-      where: { id: banner.partnerPointId },
-    });
-    if (
-      !linked ||
-      linked.cityId !== banner.cityId ||
-      linked.status !== 'ACTIVE'
-    )
-      return {
-        chatId: ownerId,
-        callbackText: 'Нужна активная точка того же города',
-      };
-    await tx.partnerCityBanner.upsert({
-      where: { cityId: banner.cityId },
-      create: {
-        cityId: banner.cityId,
-        title: banner.title,
-        text: banner.text,
-        buttonLabel: banner.buttonLabel,
-        buttonUrl: banner.buttonUrl,
-        partnerPointId: banner.partnerPointId,
-        startsAt: new Date(banner.startsAt),
-        endsAt: new Date(banner.endsAt),
-        enabled: true,
-      },
-      update: {
-        title: banner.title,
-        text: banner.text,
-        buttonLabel: banner.buttonLabel,
-        buttonUrl: banner.buttonUrl,
-        partnerPointId: banner.partnerPointId,
-        startsAt: new Date(banner.startsAt),
-        endsAt: new Date(banner.endsAt),
-        enabled: banner.preserveEnabled ?? true,
-      },
-    });
+    try {
+      await this.management.saveBanner(
+        tx,
+        banner,
+        banner.preserveEnabled ?? true,
+      );
+    } catch (error) {
+      if (error instanceof BadRequestException)
+        return { chatId: ownerId, callbackText: error.message };
+      throw error;
+    }
     await tx.partnerBotDraft.delete({ where: { ownerTelegramId: ownerId } });
     return {
       chatId: ownerId,

@@ -189,6 +189,7 @@ const privateCallback = (updateId: number, data: string) => ({
           createCode: jest.fn(),
           sendCampaignTest: jest.fn(),
         } as unknown as PushOwnerPairingService,
+        { issue: jest.fn() } as never,
       );
       (moderation as unknown as { safeApiCall: typeof transport }).safeApiCall =
         transport;

@@ -660,6 +660,10 @@ describe('partner bot persisted workflow and idempotence', () => {
 
   it('ends a banner without changing its linked point', async () => {
     const harness = createHarness();
+    harness.tx.partnerCityBanner.findUnique.mockResolvedValue({
+      cityId: 'balakovo',
+      endsAt: new Date('2026-10-20T08:00:00Z'),
+    });
     const bot = harness.service();
     const response = await bot.process(
       message(570, '/partner_banner_end balakovo'),

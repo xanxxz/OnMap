@@ -18,6 +18,7 @@ import {
   type PanelReply,
 } from './telegram-owner-panel.service';
 import { PushOwnerPairingService } from '../../../push/push-owner-pairing.service';
+import { OwnerAdminAuthService } from '../../../owner-admin/owner-admin-auth.service';
 import {
   downloadPartnerTelegramImage,
   telegramImageReference,
@@ -174,6 +175,7 @@ export class TelegramModerationBotService
     private readonly pushCampaignBot: PushCampaignBotService,
     private readonly ownerPanel: TelegramOwnerPanelService,
     private readonly ownerPairing: PushOwnerPairingService,
+    private readonly ownerAdminAuth: OwnerAdminAuthService,
   ) {
     this.token =
       config.get<string>(TELEGRAM_MODERATION_CONFIG.tokenEnv)?.trim() ?? '';
@@ -224,10 +226,9 @@ export class TelegramModerationBotService
     }
     this.active = true;
     this.stopped = false;
-    this.outboxTimer = setInterval(
-      () => this.processOneOutbox().catch(() => undefined),
-      TELEGRAM_MODERATION_CONFIG.outboxPollIntervalMs,
-    );
+    this.outboxTimer = setInterval(() => {
+      void this.processOneOutbox().catch(() => undefined);
+    }, TELEGRAM_MODERATION_CONFIG.outboxPollIntervalMs);
     this.outboxTimer.unref();
     this.pollLoopPromise = this.pollLoop();
     this.processOneOutbox().catch(() => undefined);
@@ -331,6 +332,7 @@ export class TelegramModerationBotService
           chat_id: reply.chatId,
           text: reply.text.slice(0, 4_000),
           reply_markup: keyboard,
+          ...(reply.parseMode ? { parse_mode: reply.parseMode } : {}),
         });
       }
       return;
@@ -492,6 +494,27 @@ export class TelegramModerationBotService
     const chat = asRecord(source?.chat);
     const from = callback ? asRecord(callback.from) : asRecord(source?.from);
     const chatId = idString(chat?.id) ?? '';
+    if (delegate.kind === 'ADMIN_TOKEN') {
+      if (chat?.type !== 'private' || idString(from?.id) !== chatId)
+        return { chatId, callbackText: 'Нет прав' };
+      // Panel action is one-time; the update is also claimed before issuing.
+      // Never persist the returned bearer in the update ledger, outbox or logs.
+      if (!(await this.markUpdateProcessed(update.update_id as number)))
+        return { chatId, duplicate: true, callbackText: 'Уже обработано' };
+      try {
+        const result = await this.ownerAdminAuth.issue(chatId);
+        return {
+          chatId,
+          parseMode: 'HTML',
+          text: `Токен для локальной админки OnMap:\n<code>${result.token}</code>\n\nСкопируйте только токен в поле «Токен владельца» на Mac. Действует 20 минут. Прежний токен отозван.\nТокен не является паролем Telegram или SSH. После использования сообщение можно удалить.`,
+        };
+      } catch {
+        return {
+          chatId,
+          text: 'Не удалось выдать токен. Откройте «Вход в админку» заново. Допускается не более трёх выдач в минуту; доступ должен быть включён для владельца.',
+        };
+      }
+    }
     if (delegate.kind === 'PAIR_CODE') {
       let code: string;
       try {

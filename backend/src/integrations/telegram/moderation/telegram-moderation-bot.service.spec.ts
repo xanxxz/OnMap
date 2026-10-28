@@ -12,6 +12,7 @@ import type { PartnerBotService } from '../../../partner-placements/partner-bot.
 import type { PushCampaignBotService } from '../../../push/push-campaign-bot.service';
 import type { TelegramOwnerPanelService } from './telegram-owner-panel.service';
 import type { PushOwnerPairingService } from '../../../push/push-owner-pairing.service';
+import type { OwnerAdminAuthService } from '../../../owner-admin/owner-admin-auth.service';
 import {
   formatModerationPollingFailure,
   TelegramModerationBotService,
@@ -91,6 +92,12 @@ const createService = (expiresAt = new Date(Date.now() + 60_000)) => {
           : '',
   };
   const gateway = { broadcastUpdated: jest.fn(), broadcastResolved: jest.fn() };
+  const ownerAdminAuth = {
+    issue: jest.fn().mockResolvedValue({
+      token: 'onmap_owner_test_only',
+      expiresAt: new Date(),
+    }),
+  };
   const service = new TelegramModerationBotService(
     config as unknown as ConfigService,
     prisma as unknown as PrismaService,
@@ -116,21 +123,102 @@ const createService = (expiresAt = new Date(Date.now() + 60_000)) => {
       createCode: jest.fn(),
       sendCampaignTest: jest.fn(),
     } as unknown as PushOwnerPairingService,
+    ownerAdminAuth as unknown as OwnerAdminAuthService,
   );
   const privateService = service as unknown as {
     active: boolean;
     processUpdate(update: unknown): Promise<void>;
     processOneOutbox(): Promise<void>;
+    processPanelDelegation(
+      update: unknown,
+      delegate: { kind: 'ADMIN_TOKEN' },
+    ): Promise<{
+      text?: string;
+      duplicate?: boolean;
+      parseMode?: string;
+      callbackText?: string;
+    }>;
     processCallbackUpdate(
       updateId: number,
       action: ModerationCallbackAction,
       callback: Record<string, unknown>,
     ): Promise<{ status: string; event?: typeof event }>;
   };
-  return { service, privateService, prisma, gateway, event, executedSql };
+  return {
+    service,
+    privateService,
+    prisma,
+    gateway,
+    event,
+    executedSql,
+    ownerAdminAuth,
+  };
 };
 
 describe('TelegramModerationBotService', () => {
+  it('issues admin access only for a claimed private sender update without caching the token', async () => {
+    const h = createService();
+    const update = {
+      update_id: 901,
+      callback_query: {
+        from: { id: Number(OWNER_ID) },
+        message: { chat: { id: Number(OWNER_ID), type: 'private' } },
+      },
+    };
+    const reply = await h.privateService.processPanelDelegation(update, {
+      kind: 'ADMIN_TOKEN',
+    });
+    expect(reply.parseMode).toBe('HTML');
+    expect(h.ownerAdminAuth.issue).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.stringify(h.prisma.$queryRaw.mock.calls, (_key, value: unknown) =>
+        typeof value === 'bigint' ? String(value) : value,
+      ),
+    ).not.toContain('onmap_owner_test_only');
+    h.prisma.$queryRaw.mockReturnValueOnce([]);
+    expect(
+      await h.privateService.processPanelDelegation(update, {
+        kind: 'ADMIN_TOKEN',
+      }),
+    ).toMatchObject({ duplicate: true });
+    expect(h.ownerAdminAuth.issue).toHaveBeenCalledTimes(1);
+  });
+  it('does not issue admin tokens in groups, to mismatched senders, or after an auth error', async () => {
+    const h = createService();
+    for (const [type, sender] of [
+      ['group', OWNER_ID],
+      ['private', '999'],
+    ]) {
+      await expect(
+        h.privateService.processPanelDelegation(
+          {
+            update_id: 902,
+            callback_query: {
+              from: { id: Number(sender) },
+              message: { chat: { id: Number(OWNER_ID), type } },
+            },
+          },
+          { kind: 'ADMIN_TOKEN' },
+        ),
+      ).resolves.toMatchObject({ callbackText: 'Нет прав' });
+    }
+    expect(h.ownerAdminAuth.issue).not.toHaveBeenCalled();
+    h.ownerAdminAuth.issue.mockRejectedValueOnce(
+      new Error('private-internal-secret'),
+    );
+    const reply = await h.privateService.processPanelDelegation(
+      {
+        update_id: 903,
+        message: {
+          from: { id: Number(OWNER_ID) },
+          chat: { id: Number(OWNER_ID), type: 'private' },
+        },
+      },
+      { kind: 'ADMIN_TOKEN' },
+    );
+    expect(reply.text).toContain('Не удалось выдать');
+    expect(reply.text).not.toContain('private-internal-secret');
+  });
   it('keeps provider and database details out of polling diagnostics', () => {
     const databaseError = Object.assign(
       new Error('secret database URL and query payload'),

@@ -88,6 +88,13 @@ const ISO_WITH_ZONE =
 
 export const parsePlacementDate = (raw: string): string | null => {
   if (!ISO_WITH_ZONE.test(raw)) return null;
+  const day = raw.slice(0, 10);
+  const calendar = new Date(day + 'T00:00:00Z');
+  if (
+    !Number.isFinite(calendar.getTime()) ||
+    calendar.toISOString().slice(0, 10) !== day
+  )
+    return null;
   const date = new Date(raw);
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 };

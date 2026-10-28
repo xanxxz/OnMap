@@ -6,9 +6,15 @@ import { PartnerBotService } from '../../../partner-placements/partner-bot.servi
 import { PushCampaignBotService } from '../../../push/push-campaign-bot.service';
 import { TelegramOwnerPanelService } from './telegram-owner-panel.service';
 import { PushModule } from '../../../push/push.module';
+import { OwnerAdminModule } from '../../../owner-admin/owner-admin.module';
 
 @Module({
-  imports: [RoadEventsModule, TelegramSingletonLockModule, PushModule],
+  imports: [
+    RoadEventsModule,
+    TelegramSingletonLockModule,
+    PushModule,
+    OwnerAdminModule,
+  ],
   providers: [
     TelegramModerationBotService,
     PartnerBotService,

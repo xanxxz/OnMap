@@ -718,3 +718,33 @@ model RoadEventModerationAudit {
   @@index([roadEventId, createdAt], map: "road_event_moderation_audit_event_idx")
   @@map("road_event_moderation_audit")
 }
+
+// Local owner console: capabilities are random, short lived and stored only as hashes.
+model OwnerAdminSession {
+  ownerTelegramId String @id @map("owner_telegram_id") @db.VarChar(64)
+  tokenHash String @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  @@map("owner_admin_sessions")
+}
+
+model OwnerAdminMutation {
+  ownerTelegramId String @map("owner_telegram_id") @db.VarChar(64)
+  requestKey String @map("request_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@id([ownerTelegramId, requestKey])
+  @@index([createdAt], map: "owner_admin_mutations_created_idx")
+  @@map("owner_admin_mutations")
+}
+
+model OwnerAdminAudit {
+  id String @id @default(uuid()) @db.Uuid
+  ownerTelegramId String @map("owner_telegram_id") @db.VarChar(64)
+  action String @db.VarChar(40)
+  entityId String @map("entity_id") @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([createdAt], map: "owner_admin_audit_created_idx")
+  @@map("owner_admin_audit")
+}

@@ -17,6 +17,8 @@ import { RoadEventsModule } from './road-events/road-events.module';
 import { PartnerPlacementsModule } from './partner-placements/partner-placements.module';
 import { parseAllowedOrigins } from './cors/allowed-origins';
 import { PushModule } from './push/push.module';
+import { OwnerAdminModule } from './owner-admin/owner-admin.module';
+import { ownerAdminOrigin } from './owner-admin/owner-admin.config';
 
 const DEFAULT_PORT = 4000;
 
@@ -75,6 +77,12 @@ export const validateEnvironment = (environment: Record<string, unknown>) => {
     }
   }
 
+  ownerAdminOrigin(
+    typeof environment.OWNER_ADMIN_ORIGIN === 'string'
+      ? environment.OWNER_ADMIN_ORIGIN
+      : undefined,
+  );
+
   return {
     ...environment,
 
@@ -113,6 +121,8 @@ export const validateEnvironment = (environment: Record<string, unknown>) => {
     PartnerPlacementsModule,
 
     PushModule,
+
+    OwnerAdminModule,
   ],
 })
 export class AppModule {}

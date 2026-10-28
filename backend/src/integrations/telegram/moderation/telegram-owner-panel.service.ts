@@ -55,6 +55,7 @@ type Screen =
   | 'RESTRICTIONS'
   | 'STATS'
   | 'PAIR_CONFIRM'
+  | 'ADMIN'
   | 'SETTINGS';
 type ScreenPayload = {
   id?: string;
@@ -75,12 +76,14 @@ export type PanelDelegate =
   | { kind: 'PARTNER' | 'PUSH'; command: string }
   | { kind: 'MODERATION'; callbackData: string }
   | { kind: 'PAIR_CODE' }
+  | { kind: 'ADMIN_TOKEN' }
   | { kind: 'PAIR_BY_PUSH' }
   | { kind: 'PAIR_CONFIRM'; code: string }
   | { kind: 'TEST_PUSH'; campaignId: string };
 export type PanelReply = PartnerBotReply & {
   editMessageId?: number;
   delegate?: PanelDelegate;
+  parseMode?: 'HTML';
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -115,6 +118,7 @@ export class TelegramOwnerPanelService {
   private readonly ownerIds: ReadonlySet<string>;
   private readonly partnerOwnerIds: ReadonlySet<string>;
   private readonly moderationOwnerId: string;
+  private readonly adminEnabled: boolean;
   private roadAndPartnerTotalsCache?: {
     expiresAt: number;
     eventCount: number;
@@ -126,6 +130,7 @@ export class TelegramOwnerPanelService {
     config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
+    this.adminEnabled = config.get<string>('OWNER_ADMIN_ENABLED') === 'true';
     this.partnerOwnerIds = parsePartnerOwnerIds(
       config.get<string>('TELEGRAM_PARTNER_OWNER_IDS'),
     );
@@ -149,7 +154,9 @@ export class TelegramOwnerPanelService {
       ?.trim()
       .split(/\s/u, 1)[0]
       ?.split('@', 1)[0];
-    return ['/start', '/menu', '/cancel', '/help'].includes(text ?? '');
+    return ['/start', '/menu', '/cancel', '/help', '/admin'].includes(
+      text ?? '',
+    );
   }
 
   async shouldHandleSearchText(update: unknown): Promise<boolean> {
@@ -289,7 +296,8 @@ export class TelegramOwnerPanelService {
               };
           }
           await this.markProcessed(tx, updateId);
-          const screen = name === '/help' ? 'HELP' : 'HOME';
+          const screen =
+            name === '/help' ? 'HELP' : name === '/admin' ? 'ADMIN' : 'HOME';
           return this.render(tx, ownerId, screen, {}, undefined);
         }
 
@@ -350,6 +358,7 @@ export class TelegramOwnerPanelService {
           row.action === 'DELEGATE' ||
           row.action === 'MODERATE' ||
           row.action === 'PAIR_CODE' ||
+          row.action === 'ADMIN_TOKEN' ||
           row.action === 'PAIR_BY_PUSH' ||
           row.action === 'TEST_PUSH'
         ) {
@@ -374,6 +383,12 @@ export class TelegramOwnerPanelService {
           }
           if (row.action === 'PAIR_CODE' && this.partnerOwnerIds.has(ownerId))
             return { chatId, delegate: { kind: 'PAIR_CODE' } };
+          if (
+            row.action === 'ADMIN_TOKEN' &&
+            this.adminEnabled &&
+            this.partnerOwnerIds.has(ownerId)
+          )
+            return { chatId, delegate: { kind: 'ADMIN_TOKEN' } };
           if (
             row.action === 'PAIR_BY_PUSH' &&
             this.partnerOwnerIds.has(ownerId)
@@ -450,6 +465,7 @@ export class TelegramOwnerPanelService {
           'PUSH_DETAIL',
           'PUSH_END',
           'STATS',
+          'ADMIN',
         ].includes(screen)) ||
       (!isModerator &&
         ['MODERATION', 'CASES', 'CASE', 'CASE_SEARCH', 'RESTRICTIONS'].includes(
@@ -467,7 +483,20 @@ export class TelegramOwnerPanelService {
       }
       if (isModerator) add(link('Модерация', 'MODERATION'));
       if (isPartnerOwner) add(link('Статистика', 'STATS'));
+      if (isPartnerOwner && this.adminEnabled)
+        add(link('Вход в админку', 'ADMIN'));
       add(link('Настройки', 'SETTINGS'), link('Помощь', 'HELP'));
+    } else if (screen === 'ADMIN') {
+      title = this.adminEnabled
+        ? 'Вход в локальную админку OnMap\nНа Mac откройте http://127.0.0.1:4173. Адрес API: https://api.balakovo-go.ru/api.\nНажмите «Получить токен», скопируйте его в поле панели и нажмите «Войти».\nТокен действует 20 минут. Выдача нового завершит прежнюю сессию. Не пересылайте токен.'
+        : 'Доступ к админке пока выключен на backend.';
+      if (this.adminEnabled)
+        add({
+          text: 'Получить токен на 20 минут',
+          action: 'ADMIN_TOKEN',
+          once: true,
+        });
+      back = { screen: 'HOME' };
     } else if (screen === 'HELP') {
       title =
         'OnMap · помощь\nВсе действия доступны через кнопки. Размещения и рассылки публикуются только после подтверждения. /cancel отменяет открытый мастер. Старые команды пока сохранены для совместимости.';
@@ -1021,10 +1050,11 @@ export class TelegramOwnerPanelService {
             })
           : [];
         const impressions =
-          bannerStatRows.find((row) => row.action === 'BANNER_IMPRESSION')?._sum.count ??
-          0;
+          bannerStatRows.find((row) => row.action === 'BANNER_IMPRESSION')?._sum
+            .count ?? 0;
         const clicks =
-          bannerStatRows.find((row) => row.action === 'BANNER_CLICK')?._sum.count ?? 0;
+          bannerStatRows.find((row) => row.action === 'BANNER_CLICK')?._sum
+            .count ?? 0;
         title = `Баннер «${banner?.title ?? 'не найден'}» · ${period === 'ALL' ? 'всё время' : `${period} дней`}\nКвалифицированные показы: ${impressions}\nНажатия: ${clicks}\nВсего действий с баннером: ${impressions + clicks}.`;
         add(
           link('7 дней', 'STATS', { cityId: payload.cityId, period: '7' }),
