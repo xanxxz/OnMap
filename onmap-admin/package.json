@@ -1,0 +1,23 @@
+{
+  "name": "onmap-local-owner-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.11"
+  },
+  "scripts": {
+    "start": "npm run build && node server.mjs",
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint --no-eslintrc --config .eslintrc.cjs src/*.js *.mjs test/*.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "typescript": "^5.9.3"
+  }
+}

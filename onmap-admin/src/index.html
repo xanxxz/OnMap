@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>OnMap · Панель владельца</title>
+    <link rel="stylesheet" href="/vendor/maplibre-gl.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/vendor/maplibre-gl.js" defer></script>
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <section id="login" class="login-page">
+      <div class="login-landscape" aria-hidden="true"></div>
+      <div class="login-layout">
+        <div class="login-intro">
+          <div class="wordmark">
+            <img src="/icon.svg" alt="" width="42" height="42" />OnMap
+          </div>
+          <p class="eyebrow">ЛОКАЛЬНАЯ ПАНЕЛЬ ВЛАДЕЛЬЦА</p>
+          <h1>Всё о ваших<br />размещениях.</h1>
+          <p class="login-description">
+            Партнёрские точки, баннеры<br />и статистика OnMap в одном месте.
+          </p>
+          <span class="login-local">Работает только на этом компьютере</span>
+        </div>
+        <form id="login-form" class="login-form" novalidate>
+          <h2>Вход в панель</h2>
+          <p class="muted">В боте OnMap: /admin → «Получить токен на 20 минут».</p>
+          <label class="field" data-field="api"
+            ><span class="field-label">Адрес HTTPS API</span
+            ><input
+              id="login-api"
+              name="api"
+              type="url"
+              placeholder="https://api.example.ru/api"
+              required
+              autocomplete="off"
+              spellcheck="false" /><span
+              class="field-error"
+              id="api-error"
+              hidden
+            ></span
+          ></label>
+          <label class="field" data-field="token"
+            ><span class="field-label" id="token-label">Токен владельца</span
+            ><input
+              aria-labelledby="token-label"
+              id="login-token"
+              name="token"
+              type="password"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            /><span class="field-hint"
+              >Токен очищается из поля после отправки.</span
+            ></label
+          >
+          <div id="login-error" class="inline-error" role="alert" hidden></div>
+          <button id="login-submit" class="primary" type="submit">Войти</button>
+          <p class="login-security">
+            Соединение с backend — через HTTPS.<br />Токен хранится только в
+            памяти этой страницы.<br />После перезагрузки потребуется войти
+            заново.
+          </p>
+        </form>
+      </div>
+    </section>
+    <div id="console" hidden>
+      <header class="app-header">
+        <button
+          id="brand-home"
+          class="wordmark brand-button"
+          type="button"
+          aria-label="OnMap — обзор"
+        >
+          <img src="/icon.svg" width="30" height="30" alt="" />OnMap
+        </button>
+        <nav class="top-nav" aria-label="Разделы">
+          <button type="button" data-page="overview">Обзор</button
+          ><button type="button" data-page="points">Партнёрские точки</button
+          ><button type="button" data-page="banners">Баннеры</button>
+        </nav>
+        <div class="session">
+          <span id="expiry" aria-live="off"></span>
+          <details class="session-menu">
+            <summary aria-label="Управление сессией">
+              <span class="owner-avatar" aria-hidden="true"></span
+              ><span class="session-menu-label">Владелец</span
+              ><span aria-hidden="true">⌄</span>
+            </summary>
+            <div class="menu-popover">
+              <p>Только статистика<br />и управление размещениями</p>
+              <button type="button" id="rotate">Обновить токен</button
+              ><button type="button" id="logout">Выйти</button>
+            </div>
+          </details>
+        </div>
+      </header>
+      <main id="main" tabindex="-1"></main>
+    </div>
+    <div id="notifications" class="notifications" aria-live="polite"></div>
+  </body>
+</html>
